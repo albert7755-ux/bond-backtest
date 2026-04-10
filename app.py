@@ -1,327 +1,338 @@
 import streamlit as st
-import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
-import plotly.express as px
 
-# ==========================================
-# 設定
-# ==========================================
 st.set_page_config(page_title="債券績效比較工具", layout="wide", page_icon="📊")
 
-# 從 Streamlit Secrets 讀取 API Key
-FINNHUB_KEY = st.secrets.get("FINNHUB_KEY", "")
+st.title("📊 債券績效比較工具")
+st.markdown("上傳從 TradingView 匯出的兩檔債券 CSV，自動計算並比較各期間績效。")
 
 # ==========================================
-# 核心函數
+# 工具函數
 # ==========================================
 
-def get_bond_profile(isin: str) -> dict:
-    """抓取債券基本資料"""
-    url = f"https://finnhub.io/api/v1/bond/profile?isin={isin}&token={FINNHUB_KEY}"
-    try:
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            return r.json()
-    except Exception as e:
-        st.error(f"無法抓取債券資料: {e}")
-    return {}
-
-def get_bond_price_history(isin: str, from_date: str, to_date: str) -> pd.DataFrame:
-    """抓取債券歷史價格（用 bond/tick endpoint）"""
-    # Finnhub bond tick: 每次只能抓一天，需要逐日抓
-    # 改用 bond/price 端點
-    url = f"https://finnhub.io/api/v1/bond/price?isin={isin}&token={FINNHUB_KEY}"
-    try:
-        r = requests.get(url, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            return data
-    except Exception as e:
-        st.error(f"抓取價格失敗: {e}")
-    return {}
-
-def get_bond_candles(isin: str, days_back: int) -> pd.DataFrame:
-    """
-    用 Finnhub bond/tick 抓歷史成交資料
-    每次抓一天，累積成歷史序列
-    """
-    end_date = datetime.today()
-    start_date = end_date - timedelta(days=days_back)
-    
-    all_data = []
-    current = end_date
-    
-    progress = st.progress(0)
-    total_days = min(days_back, 365)  # 免費版最多1年
-    checked = 0
-    
-    # 每週抓一次（減少 API 呼叫次數）
-    while current >= start_date:
-        date_str = current.strftime("%Y-%m-%d")
-        url = f"https://finnhub.io/api/v1/bond/tick?isin={isin}&date={date_str}&limit=10&token={FINNHUB_KEY}"
-        try:
-            r = requests.get(url, timeout=5)
-            if r.status_code == 200:
-                data = r.json()
-                if data and "p" in data and len(data["p"]) > 0:
-                    # 取當天最後一筆成交價
-                    prices = data["p"]
-                    all_data.append({
-                        "date": date_str,
-                        "price": prices[-1]
-                    })
-        except:
-            pass
-        
-        current -= timedelta(days=7)  # 每次往前跳一週
-        checked += 7
-        progress.progress(min(checked / total_days, 1.0))
-    
-    progress.empty()
-    
-    if not all_data:
-        return pd.DataFrame()
-    
-    df = pd.DataFrame(all_data)
-    df["date"] = pd.to_datetime(df["date"])
+def load_csv(file) -> pd.DataFrame:
+    """讀取 TradingView 匯出的 CSV"""
+    df = pd.read_csv(file)
+    # 轉換 Unix Timestamp → 日期
+    df["date"] = pd.to_datetime(df["time"], unit="s")
+    df = df[["date", "open", "high", "low", "close"]].copy()
     df = df.sort_values("date").reset_index(drop=True)
     return df
 
-
-def calculate_performance(df: pd.DataFrame, coupon_rate: float, period_label: str, days: int) -> dict:
-    """計算某段期間的總報酬"""
-    if df.empty or len(df) < 2:
-        return None
-    
+def calculate_period_return(df: pd.DataFrame, coupon_rate: float, days: int) -> dict:
+    """計算某段期間的總報酬（價格報酬 + 票息收益）"""
     end_date = df["date"].max()
     start_date = end_date - timedelta(days=days)
     
-    period_df = df[df["date"] >= start_date]
+    period_df = df[df["date"] >= start_date].copy()
+    
     if len(period_df) < 2:
         return None
     
-    start_price = period_df["price"].iloc[0]
-    end_price = period_df["price"].iloc[-1]
+    start_price = period_df["close"].iloc[0]
+    end_price = period_df["close"].iloc[-1]
     
-    # 價格報酬（以面值100為基準）
+    # 實際持有天數
+    actual_days = (period_df["date"].iloc[-1] - period_df["date"].iloc[0]).days
+    if actual_days == 0:
+        return None
+    
+    # 價格報酬
     price_return = (end_price - start_price) / start_price
     
     # 票息收益（年化票息 × 持有天數/365）
-    actual_days = (period_df["date"].iloc[-1] - period_df["date"].iloc[0]).days
-    coupon_return = coupon_rate / 100 * actual_days / 365
+    coupon_return = (coupon_rate / 100) * (actual_days / 365)
     
     # 總報酬
     total_return = price_return + coupon_return
     
     return {
-        "期間": period_label,
+        "起始日期": period_df["date"].iloc[0].strftime("%Y-%m-%d"),
+        "結束日期": period_df["date"].iloc[-1].strftime("%Y-%m-%d"),
         "起始價格": round(start_price, 3),
         "結束價格": round(end_price, 3),
-        "價格漲跌": f"{price_return:.2%}",
-        "票息收益": f"{coupon_return:.2%}",
-        "總報酬": f"{total_return:.2%}",
-        "total_return_num": total_return
+        "價格漲跌": price_return,
+        "票息收益": coupon_return,
+        "總報酬": total_return,
     }
 
+def get_all_periods(df: pd.DataFrame, coupon_rate: float) -> pd.DataFrame:
+    """計算所有期間的績效"""
+    periods = [
+        ("1個月", 30),
+        ("3個月", 90),
+        ("6個月", 180),
+        ("1年", 365),
+        ("2年", 730),
+        ("3年", 1095),
+        ("5年", 1825),
+    ]
+    
+    rows = []
+    for label, days in periods:
+        r = calculate_period_return(df, coupon_rate, days)
+        if r:
+            rows.append({
+                "期間": label,
+                "起始日期": r["起始日期"],
+                "結束日期": r["結束日期"],
+                "起始價格": r["起始價格"],
+                "結束價格": r["結束價格"],
+                "價格漲跌": r["價格漲跌"],
+                "票息收益": r["票息收益"],
+                "總報酬": r["總報酬"],
+            })
+    
+    return pd.DataFrame(rows)
 
 # ==========================================
-# 主介面
+# 上傳區
 # ==========================================
-st.title("📊 債券績效比較工具")
-st.markdown("輸入兩檔債券的 ISIN，自動比較各期間績效表現。")
-
-if not FINNHUB_KEY:
-    st.error("⚠️ 尚未設定 Finnhub API Key！請在 Streamlit Secrets 加入 FINNHUB_KEY。")
-    st.code("""
-# .streamlit/secrets.toml 內容：
-FINNHUB_KEY = "你的API Key"
-    """)
-    st.stop()
-
-# 輸入區
+st.markdown("---")
 col1, col2 = st.columns(2)
+
 with col1:
     st.subheader("📌 債券 A")
-    isin_a = st.text_input("ISIN", value="US88579YBD22", key="isin_a").upper().strip()
-    coupon_a = st.number_input("票息率 (%)", value=4.00, step=0.01, key="coupon_a")
+    file_a = st.file_uploader("上傳 CSV（從TradingView匯出）", type="csv", key="file_a")
+    name_a = st.text_input("債券名稱", value="3M 4% 2048", key="name_a")
+    coupon_a = st.number_input("票息率 (%)", value=4.00, step=0.01, key="coupon_a",
+                                help="年化票息率，例如 4% 就填 4.00")
 
 with col2:
     st.subheader("📌 債券 B")
-    isin_b = st.text_input("ISIN", value="US084664CQ25", key="isin_b").upper().strip()
+    file_b = st.file_uploader("上傳 CSV（從TradingView匯出）", type="csv", key="file_b")
+    name_b = st.text_input("債券名稱", value="Berkshire 4.2% 2048", key="name_b")
     coupon_b = st.number_input("票息率 (%)", value=4.20, step=0.01, key="coupon_b")
 
 st.markdown("---")
 
-# 執行按鈕
-if st.button("🚀 開始比較", type="primary"):
-    
-    if not isin_a or not isin_b:
-        st.error("請輸入兩檔債券的 ISIN！")
-        st.stop()
+# ==========================================
+# 主邏輯
+# ==========================================
+if file_a or file_b:
 
-    # ---- 抓取債券資料 ----
-    with st.spinner("正在抓取債券 A 基本資料..."):
-        profile_a = get_bond_profile(isin_a)
-    
-    with st.spinner("正在抓取債券 B 基本資料..."):
-        profile_b = get_bond_profile(isin_b)
+    df_a = load_csv(file_a) if file_a else None
+    df_b = load_csv(file_b) if file_b else None
 
-    # 顯示基本資料
-    st.subheader("📋 債券基本資料")
-    
+    # 資料基本資訊
     info_col1, info_col2 = st.columns(2)
-    
     with info_col1:
-        st.markdown(f"**債券 A：{isin_a}**")
-        if profile_a:
-            st.json(profile_a)
-        else:
-            st.warning("找不到債券 A 的基本資料，但仍會嘗試抓取價格。")
-    
+        if df_a is not None:
+            st.success(f"✅ {name_a}：{len(df_a)} 筆資料")
+            st.caption(f"資料期間：{df_a['date'].min().strftime('%Y-%m-%d')} ～ {df_a['date'].max().strftime('%Y-%m-%d')}")
     with info_col2:
-        st.markdown(f"**債券 B：{isin_b}**")
-        if profile_b:
-            st.json(profile_b)
-        else:
-            st.warning("找不到債券 B 的基本資料，但仍會嘗試抓取價格。")
+        if df_b is not None:
+            st.success(f"✅ {name_b}：{len(df_b)} 筆資料")
+            st.caption(f"資料期間：{df_b['date'].min().strftime('%Y-%m-%d')} ～ {df_b['date'].max().strftime('%Y-%m-%d')}")
 
-    st.markdown("---")
+    # ==========================================
+    # 績效比較表
+    # ==========================================
+    st.subheader("🏆 各期間績效比較")
 
-    # ---- 抓取歷史價格（最多365天）----
-    st.subheader("📈 抓取歷史價格中...")
-    
-    with st.spinner(f"正在抓取 {isin_a} 過去一年價格（每週一筆，約需30秒）..."):
-        df_a = get_bond_candles(isin_a, days_back=365)
-    
-    with st.spinner(f"正在抓取 {isin_b} 過去一年價格（每週一筆，約需30秒）..."):
-        df_b = get_bond_candles(isin_b, days_back=365)
+    perf_a = get_all_periods(df_a, coupon_a) if df_a is not None else pd.DataFrame()
+    perf_b = get_all_periods(df_b, coupon_b) if df_b is not None else pd.DataFrame()
 
-    # 檢查有無資料
-    has_data_a = not df_a.empty
-    has_data_b = not df_b.empty
+    if not perf_a.empty or not perf_b.empty:
+        # 合併比較表
+        periods_order = ["1個月", "3個月", "6個月", "1年", "2年", "3年", "5年"]
+        rows = []
+        for period in periods_order:
+            row = {"期間": period}
 
-    if not has_data_a and not has_data_b:
-        st.error("""
-        ❌ 兩檔債券都抓不到歷史成交資料。
+            ra = perf_a[perf_a["期間"] == period].iloc[0] if not perf_a.empty and period in perf_a["期間"].values else None
+            rb = perf_b[perf_b["期間"] == period].iloc[0] if not perf_b.empty and period in perf_b["期間"].values else None
+
+            if ra is not None:
+                row[f"A 價格漲跌"] = f"{ra['價格漲跌']:.2%}"
+                row[f"A 票息收益"] = f"{ra['票息收益']:.2%}"
+                row[f"A 總報酬"] = f"{ra['總報酬']:.2%}"
+                row["_a_total"] = ra["總報酬"]
+            else:
+                row[f"A 價格漲跌"] = "資料不足"
+                row[f"A 票息收益"] = "-"
+                row[f"A 總報酬"] = "-"
+                row["_a_total"] = None
+
+            if rb is not None:
+                row[f"B 價格漲跌"] = f"{rb['價格漲跌']:.2%}"
+                row[f"B 票息收益"] = f"{rb['票息收益']:.2%}"
+                row[f"B 總報酬"] = f"{rb['總報酬']:.2%}"
+                row["_b_total"] = rb["總報酬"]
+            else:
+                row[f"B 價格漲跌"] = "資料不足"
+                row[f"B 票息收益"] = "-"
+                row[f"B 總報酬"] = "-"
+                row["_b_total"] = None
+
+            # 勝負判斷
+            if row["_a_total"] is not None and row["_b_total"] is not None:
+                if row["_a_total"] > row["_b_total"]:
+                    row["勝出"] = f"🏆 A ({name_a})"
+                elif row["_b_total"] > row["_a_total"]:
+                    row["勝出"] = f"🏆 B ({name_b})"
+                else:
+                    row["勝出"] = "平手"
+            else:
+                row["勝出"] = "-"
+
+            rows.append(row)
+
+        df_compare = pd.DataFrame(rows)
+        display_cols = ["期間", "A 價格漲跌", "A 票息收益", "A 總報酬", "B 價格漲跌", "B 票息收益", "B 總報酬", "勝出"]
         
-        可能原因：
-        1. Finnhub 免費版不支援這兩檔債券的 tick 資料
-        2. 這兩檔債券在 TRACE 的成交量太低
-        3. API Key 額度用完
-        
-        建議：請確認你的 Finnhub API Key 是否正確，或嘗試其他 ISIN。
-        """)
-        st.stop()
-
-    # ---- 顯示資料筆數 ----
-    data_col1, data_col2 = st.columns(2)
-    with data_col1:
-        if has_data_a:
-            st.success(f"✅ 債券 A：抓到 {len(df_a)} 筆歷史價格")
-            st.dataframe(df_a.tail(10), use_container_width=True)
-        else:
-            st.error("❌ 債券 A：無歷史成交資料")
-    
-    with data_col2:
-        if has_data_b:
-            st.success(f"✅ 債券 B：抓到 {len(df_b)} 筆歷史價格")
-            st.dataframe(df_b.tail(10), use_container_width=True)
-        else:
-            st.error("❌ 債券 B：無歷史成交資料")
-
-    # ---- 績效比較 ----
-    if has_data_a or has_data_b:
-        st.markdown("---")
-        st.subheader("🏆 各期間績效比較")
-
-        periods = [
-            ("1個月", 30),
-            ("3個月", 90),
-            ("6個月", 180),
-            ("1年", 365),
+        # 改欄位名稱顯示
+        df_display = df_compare[display_cols].copy()
+        df_display.columns = [
+            "期間",
+            f"A 價格漲跌\n({name_a})", f"A 票息收益\n({name_a})", f"A 總報酬\n({name_a})",
+            f"B 價格漲跌\n({name_b})", f"B 票息收益\n({name_b})", f"B 總報酬\n({name_b})",
+            "勝出"
         ]
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-        results_a = []
-        results_b = []
-
-        for label, days in periods:
-            if has_data_a:
-                r = calculate_performance(df_a, coupon_a, label, days)
-                if r:
-                    results_a.append(r)
-            if has_data_b:
-                r = calculate_performance(df_b, coupon_b, label, days)
-                if r:
-                    results_b.append(r)
-
-        # 製作比較表
-        if results_a or results_b:
-            compare_rows = []
-            for label, days in periods:
-                row = {"期間": label}
-                ra = next((r for r in results_a if r["期間"] == label), None)
-                rb = next((r for r in results_b if r["期間"] == label), None)
-                
-                if ra:
-                    row[f"A 總報酬"] = ra["總報酬"]
-                    row[f"A 價格漲跌"] = ra["價格漲跌"]
-                    row[f"A 票息"] = ra["票息收益"]
-                if rb:
-                    row[f"B 總報酬"] = rb["總報酬"]
-                    row[f"B 價格漲跌"] = rb["價格漲跌"]
-                    row[f"B 票息"] = rb["票息收益"]
-                
-                if ra and rb:
-                    winner = "A 勝 🏆" if ra["total_return_num"] > rb["total_return_num"] else "B 勝 🏆"
-                    row["勝負"] = winner
-                
-                compare_rows.append(row)
-            
-            df_compare = pd.DataFrame(compare_rows)
-            st.dataframe(df_compare, use_container_width=True)
-
-        # ---- 走勢圖 ----
+    # ==========================================
+    # 勝負統計
+    # ==========================================
+    if not perf_a.empty and not perf_b.empty:
+        wins_a = sum(1 for r in rows if r["勝出"].startswith("🏆 A"))
+        wins_b = sum(1 for r in rows if r["勝出"].startswith("🏆 B"))
+        
         st.markdown("---")
-        st.subheader("📉 價格走勢圖")
-        
+        wc1, wc2, wc3 = st.columns(3)
+        wc1.metric(f"🏆 {name_a} 勝出期間", f"{wins_a} 個")
+        wc2.metric(f"🏆 {name_b} 勝出期間", f"{wins_b} 個")
+        if wins_a > wins_b:
+            wc3.metric("整體較佳", name_a, "勝出較多期間")
+        elif wins_b > wins_a:
+            wc3.metric("整體較佳", name_b, "勝出較多期間")
+        else:
+            wc3.metric("整體較佳", "平手", "")
+
+    # ==========================================
+    # 走勢圖
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📈 價格走勢圖")
+
+    tab1, tab2 = st.tabs(["標準化走勢（起始=100）", "實際價格"])
+
+    with tab1:
         fig = go.Figure()
-        
-        if has_data_a and not df_a.empty:
-            # 標準化為起始100
-            df_a_norm = df_a.copy()
-            df_a_norm["normalized"] = df_a_norm["price"] / df_a_norm["price"].iloc[0] * 100
+        if df_a is not None:
+            norm_a = df_a["close"] / df_a["close"].iloc[0] * 100
             fig.add_trace(go.Scatter(
-                x=df_a_norm["date"],
-                y=df_a_norm["normalized"],
-                mode="lines+markers",
-                name=f"債券A ({isin_a[:12]})",
-                line=dict(color="#1f77b4", width=2)
+                x=df_a["date"], y=norm_a,
+                name=name_a, line=dict(color="#1f77b4", width=2)
             ))
-        
-        if has_data_b and not df_b.empty:
-            df_b_norm = df_b.copy()
-            df_b_norm["normalized"] = df_b_norm["price"] / df_b_norm["price"].iloc[0] * 100
+        if df_b is not None:
+            norm_b = df_b["close"] / df_b["close"].iloc[0] * 100
             fig.add_trace(go.Scatter(
-                x=df_b_norm["date"],
-                y=df_b_norm["normalized"],
-                mode="lines+markers",
-                name=f"債券B ({isin_b[:12]})",
-                line=dict(color="#ff7f0e", width=2)
+                x=df_b["date"], y=norm_b,
+                name=name_b, line=dict(color="#ff7f0e", width=2)
             ))
-        
         fig.update_layout(
-            title="債券價格走勢（標準化，起始=100）",
-            yaxis_title="相對價格",
+            yaxis_title="相對價格（起始=100）",
             xaxis_title="日期",
             hovermode="x unified",
-            height=450
+            height=450,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02)
         )
         st.plotly_chart(fig, use_container_width=True)
-        
-        st.caption("⚠️ 注意：Finnhub 免費版每分鐘限制60次請求，若資料不完整請稍後再試。")
+
+    with tab2:
+        fig2 = go.Figure()
+        if df_a is not None:
+            fig2.add_trace(go.Scatter(
+                x=df_a["date"], y=df_a["close"],
+                name=name_a, line=dict(color="#1f77b4", width=2)
+            ))
+        if df_b is not None:
+            fig2.add_trace(go.Scatter(
+                x=df_b["date"], y=df_b["close"],
+                name=name_b, line=dict(color="#ff7f0e", width=2)
+            ))
+        fig2.update_layout(
+            yaxis_title="價格（面值100）",
+            xaxis_title="日期",
+            hovermode="x unified",
+            height=450,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02)
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    # ==========================================
+    # 年度報酬表
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📅 年度報酬回顧")
+
+    def calc_annual_returns(df: pd.DataFrame, coupon_rate: float) -> pd.DataFrame:
+        df = df.copy()
+        df["year"] = df["date"].dt.year
+        years = sorted(df["year"].unique())
+        rows = []
+        for year in years:
+            year_df = df[df["year"] == year]
+            if len(year_df) < 2:
+                continue
+            start_p = year_df["close"].iloc[0]
+            end_p = year_df["close"].iloc[-1]
+            days = (year_df["date"].iloc[-1] - year_df["date"].iloc[0]).days
+            price_ret = (end_p - start_p) / start_p
+            coupon_ret = (coupon_rate / 100) * (days / 365)
+            total_ret = price_ret + coupon_ret
+            rows.append({
+                "年度": str(year),
+                "價格漲跌": price_ret,
+                "票息收益": coupon_ret,
+                "總報酬": total_ret,
+            })
+        return pd.DataFrame(rows)
+
+    ann_col1, ann_col2 = st.columns(2)
+    with ann_col1:
+        if df_a is not None:
+            st.markdown(f"**{name_a}**")
+            ann_a = calc_annual_returns(df_a, coupon_a)
+            if not ann_a.empty:
+                st.dataframe(
+                    ann_a.style.format({
+                        "價格漲跌": "{:.2%}",
+                        "票息收益": "{:.2%}",
+                        "總報酬": "{:.2%}"
+                    }).background_gradient(subset=["總報酬"], cmap="RdYlGn", vmin=-0.15, vmax=0.15),
+                    use_container_width=True,
+                    hide_index=True
+                )
+    with ann_col2:
+        if df_b is not None:
+            st.markdown(f"**{name_b}**")
+            ann_b = calc_annual_returns(df_b, coupon_b)
+            if not ann_b.empty:
+                st.dataframe(
+                    ann_b.style.format({
+                        "價格漲跌": "{:.2%}",
+                        "票息收益": "{:.2%}",
+                        "總報酬": "{:.2%}"
+                    }).background_gradient(subset=["總報酬"], cmap="RdYlGn", vmin=-0.15, vmax=0.15),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+else:
+    st.info("👆 請上傳至少一檔債券的 CSV 檔案開始分析。")
+    st.markdown("""
+    **如何取得 CSV？**
+    1. 登入 TradingView（需 Plus 以上方案）
+    2. 搜尋債券 ISIN（例如 `US084664CQ25`）
+    3. 開啟圖表後，把時間軸往左捲到最左邊
+    4. 點右上角選單 → **匯出圖表資料...**
+    5. 下載 CSV 後上傳到這裡
+    """)
 
 st.markdown("---")
-st.markdown("*資料來源：Finnhub.io（FINRA TRACE）｜僅供參考，不構成投資建議*")
+st.caption("資料來源：TradingView | 總報酬 = 價格漲跌 + 票息收益（依實際持有天數計算）| 僅供參考，不構成投資建議")
