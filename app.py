@@ -503,12 +503,62 @@ if loaded:
     # ==========================================
     st.markdown("---")
     st.subheader("📈 價格走勢圖")
+
+    # 找出所有已載入債券的最早和最晚日期
+    all_min_date = min(df["date"].min() for _, df in loaded).date()
+    all_max_date = max(df["date"].max() for _, df in loaded).date()
+
+    # 日期範圍選擇
+    date_col1, date_col2 = st.columns(2)
+    with date_col1:
+        chart_start = st.date_input(
+            "📅 圖表起始日",
+            value=all_min_date,
+            min_value=all_min_date,
+            max_value=all_max_date,
+            key="chart_start"
+        )
+    with date_col2:
+        chart_end = st.date_input(
+            "📅 圖表結束日",
+            value=all_max_date,
+            min_value=all_min_date,
+            max_value=all_max_date,
+            key="chart_end"
+        )
+
+    # 快速選擇按鈕
+    qcol1, qcol2, qcol3, qcol4, qcol5 = st.columns(5)
+    from datetime import date, timedelta
+    today = all_max_date
+    if qcol1.button("1年"):
+        st.session_state["chart_start"] = today - timedelta(days=365)
+    if qcol2.button("2年"):
+        st.session_state["chart_start"] = today - timedelta(days=730)
+    if qcol3.button("3年"):
+        st.session_state["chart_start"] = today - timedelta(days=1095)
+    if qcol4.button("5年"):
+        st.session_state["chart_start"] = today - timedelta(days=1825)
+    if qcol5.button("全部"):
+        st.session_state["chart_start"] = all_min_date
+
+    # 套用日期篩選
+    chart_start_ts = pd.Timestamp(st.session_state.get("chart_start", chart_start))
+    chart_end_ts = pd.Timestamp(chart_end)
+
+    # 篩選後的 loaded
+    loaded_filtered = [
+        (b, df[(df["date"] >= chart_start_ts) & (df["date"] <= chart_end_ts)].copy())
+        for b, df in loaded
+    ]
+
     tab1, tab2, tab3 = st.tabs(["📊 標準化（不含息）", "📊 標準化（含息）", "💰 實際價格"])
 
     with tab1:
         st.info("📌 純價格走勢，**不含票息**。起始=100，僅反映債券市價漲跌。")
         fig = go.Figure()
-        for b, df in loaded:
+        for b, df in loaded_filtered:
+            if df.empty: continue
             norm = df["close"] / df["close"].iloc[0] * 100
             fig.add_trace(go.Scatter(x=df["date"], y=norm, name=f'{b["label"]}. {b["name"]}',
                 line=dict(color=b["color"], width=2)))
@@ -519,7 +569,8 @@ if loaded:
     with tab2:
         st.info("📌 **含票息**的總報酬指數。起始=100，每日將票息（年票息率 ÷ 365）累積計入，完整反映持有人實際拿到的報酬。")
         fig2 = go.Figure()
-        for b, df in loaded:
+        for b, df in loaded_filtered:
+            if df.empty: continue
             tri = total_return_index(df, b["coupon"])
             fig2.add_trace(go.Scatter(x=df["date"], y=tri, name=f'{b["label"]}. {b["name"]}',
                 line=dict(color=b["color"], width=2)))
@@ -530,7 +581,8 @@ if loaded:
     with tab3:
         st.info("📌 TradingView 原始收盤價，面值100為基準，**不含票息**。")
         fig3 = go.Figure()
-        for b, df in loaded:
+        for b, df in loaded_filtered:
+            if df.empty: continue
             fig3.add_trace(go.Scatter(x=df["date"], y=df["close"], name=f'{b["label"]}. {b["name"]}',
                 line=dict(color=b["color"], width=2)))
         fig3.update_layout(yaxis_title="價格（面值100）", hovermode="x unified", height=430,
