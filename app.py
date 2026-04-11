@@ -141,44 +141,82 @@ def read_sheet(sheet_id):
     return df
 
 def parse_filename(name):
-    """從檔名解析 ISIN"""
+    """從檔名解析 ISIN（支援 US 和 XS 開頭）"""
     import re
-    isin_match = re.search(r'(US[A-Z0-9]{10})', name)
+    isin_match = re.search(r'([A-Z]{2}[A-Z0-9]{10})', name)
     isin = isin_match.group(1) if isin_match else ""
     return isin
 
 @st.cache_data(ttl=86400)
-def lookup_bond_info(isin):
-    """查詢債券基本資料，先查本地對照表，查不到再上網"""
+def batch_lookup_bond_info(isin_list):
+    """用 OpenFIGI API 批次查詢多個 ISIN 的債券資訊（免費，無限制）"""
     import requests, re
 
-    # 本地對照表（常用債券直接寫死，最穩定）
-    LOCAL_DB = {
-        "US084664CQ25": {"issuer": "Berkshire Hathaway", "coupon": 4.20, "maturity": "2048"},
-        "US88579YBD22": {"issuer": "3M",                 "coupon": 4.00, "maturity": "2048"},
-        # 之後新增債券直接在這裡加一行
-    }
+    result = {}
+    # OpenFIGI 每次最多 50 個
+    chunk_size = 50
+    chunks = [isin_list[i:i+chunk_size] for i in range(0, len(isin_list), chunk_size)]
 
-    if isin in LOCAL_DB:
-        return LOCAL_DB[isin]
+    for chunk in chunks:
+        payload = [{"idType": "ID_ISIN", "idValue": isin} for isin in chunk]
+        try:
+            resp = requests.post(
+                "https://api.openfigi.com/v3/mapping",
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=15
+            )
+            data = resp.json()
+            for i, item in enumerate(data):
+                isin = chunk[i]
+                if "data" in item and item["data"]:
+                    # 找到 Corp 類型的
+                    bond_data = None
+                    for d in item["data"]:
+                        if d.get("marketSector") in ["Corp", "Govt", "Mtge"]:
+                            bond_data = d
+                            break
+                    if not bond_data:
+                        bond_data = item["data"][0]
 
-    # 查不到就上網抓（備用）
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        # 用 cbonds 搜尋
-        url = f"https://cbonds.com/bonds/?search={isin}"
-        resp = requests.get(url, headers=headers, timeout=8)
-        text = resp.text
-        coupon_match = re.search(r'(\d+\.?\d+)%', text)
-        coupon = float(coupon_match.group(1)) if coupon_match else 0.0
-        maturity_match = re.search(r'(20\d{2})', text)
-        maturity = maturity_match.group(1) if maturity_match else ""
-        if coupon > 0:
-            return {"issuer": isin, "coupon": coupon, "maturity": maturity}
-    except:
-        pass
+                    name = bond_data.get("name", isin)
+                    sec_des = bond_data.get("securityDes", "")
 
-    return {"issuer": isin, "coupon": 0.0, "maturity": ""}
+                    # 從 securityDes 解析票息和到期年（格式如：BRK/B 4.2 08/15/48）
+                    coupon = 0.0
+                    maturity = ""
+                    if sec_des:
+                        coupon_match = re.search(r'(\d+\.?\d+)\s+\d{2}/\d{2}/\d{2}', sec_des)
+                        if coupon_match:
+                            coupon = float(coupon_match.group(1))
+                        maturity_match = re.search(r'\d{2}/\d{2}/(\d{2})$', sec_des)
+                        if maturity_match:
+                            yr = int(maturity_match.group(1))
+                            maturity = str(2000 + yr) if yr < 50 else str(1900 + yr)
+
+                    # 備用：從 ticker 解析
+                    if coupon == 0.0:
+                        ticker = bond_data.get("ticker", "")
+                        coupon_match = re.search(r'(\d+\.?\d+)', ticker)
+                        if coupon_match:
+                            coupon = float(coupon_match.group(1))
+
+                    result[isin] = {
+                        "issuer": name,
+                        "coupon": coupon,
+                        "maturity": maturity
+                    }
+                else:
+                    result[isin] = {"issuer": isin, "coupon": 0.0, "maturity": ""}
+        except Exception as e:
+            for isin in chunk:
+                result[isin] = {"issuer": isin, "coupon": 0.0, "maturity": ""}
+
+    return result
+
+def lookup_bond_info(isin):
+    """單一 ISIN 查詢（從批次快取取值）"""
+    return batch_lookup_bond_info(tuple([isin])).get(isin, {"issuer": isin, "coupon": 0.0, "maturity": ""})
 
 
 # ==========================================
@@ -258,6 +296,15 @@ try:
     file_options = {f["name"]: f["id"] for f in files}
     file_names = list(file_options.keys())
 
+    # 預載所有 ISIN 資訊（批次查詢，一次搞定）
+    all_isins = [parse_filename(name) for name in file_names]
+    all_isins = [isin for isin in all_isins if isin]
+    if all_isins:
+        with st.spinner(f"正在查詢 {len(all_isins)} 檔債券基本資料..."):
+            bond_info_cache = batch_lookup_bond_info(tuple(all_isins))
+    else:
+        bond_info_cache = {}
+
 except Exception as e:
     st.error(f"❌ 無法連接 Google Drive：{e}")
     st.stop()
@@ -281,17 +328,16 @@ for i in range(n):
             key=f"sel_{i}"
         )
 
-        # 從檔名抓 ISIN，再自動查詢債券資訊
+        # 從預載快取取債券資訊
         if selected != "（請選擇）":
             isin = parse_filename(selected)
-            if isin:
-                info = lookup_bond_info(isin)
+            if isin and isin in bond_info_cache:
+                info = bond_info_cache[isin]
                 issuer = info["issuer"]
                 auto_coupon = info["coupon"]
                 maturity = info["maturity"]
-                default_name = f"{issuer} {auto_coupon}% {maturity}".strip() if issuer else selected
+                default_name = f"{issuer} {auto_coupon}% {maturity}".strip() if issuer != isin else selected
                 default_coupon = auto_coupon
-                # 強制更新 session_state，讓欄位值跟著變
                 if st.session_state.get(f"last_sel_{i}") != selected:
                     st.session_state[f"name_{i}"] = default_name
                     st.session_state[f"coupon_{i}"] = default_coupon
