@@ -275,38 +275,70 @@ if loaded:
     st.markdown("---")
     st.subheader("📈 價格走勢圖")
 
-    tab1, tab2, tab3 = st.tabs(["📊 標準化走勢（起始=100）", "💰 實際價格", "📉 回撤圖"])
+    tab1, tab2, tab3 = st.tabs([
+        "📊 標準化（不含息）",
+        "📊 標準化（含息）",
+        "💰 實際價格",
+    ])
+
+    def total_return_index(df, coupon_rate):
+        """計算含息總報酬指數（起始=100）"""
+        prices = df["close"].values
+        daily_coupon = (coupon_rate / 100) / 365
+        tri = [100.0]
+        for i in range(1, len(prices)):
+            price_ret = (prices[i] - prices[i-1]) / prices[i-1]
+            tri.append(tri[-1] * (1 + price_ret + daily_coupon))
+        return tri
 
     with tab1:
+        st.info("📌 此圖為純價格走勢，**不含票息**。起始日設為100，僅反映債券市價的漲跌幅度。若要看含票息的真實報酬，請切換至「標準化（含息）」。")
         fig = go.Figure()
         for b, df in loaded:
             norm = df["close"] / df["close"].iloc[0] * 100
-            fig.add_trace(go.Scatter(x=df["date"], y=norm, name=f'{b["label"]}. {b["name"]}',
-                line=dict(color=b["color"], width=2)))
-        fig.update_layout(yaxis_title="相對價格（起始=100）", hovermode="x unified", height=420,
-                          legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            fig.add_trace(go.Scatter(
+                x=df["date"], y=norm,
+                name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)
+            ))
+        fig.update_layout(
+            yaxis_title="相對價格（起始=100，不含息）",
+            hovermode="x unified", height=430,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02)
+        )
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
+        st.info("📌 此圖為**含票息**的總報酬指數（Total Return Index）。起始=100，每日將票息（年票息率 ÷ 365）累積計入，完整反映持有人實際拿到的報酬，包含每天滴入的利息收益。")
         fig2 = go.Figure()
         for b, df in loaded:
-            fig2.add_trace(go.Scatter(x=df["date"], y=df["close"], name=f'{b["label"]}. {b["name"]}',
-                line=dict(color=b["color"], width=2)))
-        fig2.update_layout(yaxis_title="價格（面值100）", hovermode="x unified", height=420,
-                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            tri = total_return_index(df, b["coupon"])
+            fig2.add_trace(go.Scatter(
+                x=df["date"], y=tri,
+                name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)
+            ))
+        fig2.update_layout(
+            yaxis_title="總報酬指數（起始=100，含息）",
+            hovermode="x unified", height=430,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02)
+        )
         st.plotly_chart(fig2, use_container_width=True)
 
     with tab3:
+        st.info("📌 此圖為 TradingView 的原始收盤價，以面值 100 為基準。**不含票息**，直接反映市場對該債券的定價。")
         fig3 = go.Figure()
         for b, df in loaded:
-            p = df["close"]
-            dd = (p - p.cummax()) / p.cummax() * 100
-            r, g, bl = int(b["color"][1:3],16), int(b["color"][3:5],16), int(b["color"][5:7],16)
-            fig3.add_trace(go.Scatter(x=df["date"], y=dd, name=f'{b["label"]}. {b["name"]}',
-                fill="tozeroy", line=dict(color=b["color"], width=1.5),
-                fillcolor=f"rgba({r},{g},{bl},0.15)"))
-        fig3.update_layout(yaxis_title="回撤幅度 (%)", hovermode="x unified", height=420,
-                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            fig3.add_trace(go.Scatter(
+                x=df["date"], y=df["close"],
+                name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)
+            ))
+        fig3.update_layout(
+            yaxis_title="價格（面值100）",
+            hovermode="x unified", height=430,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02)
+        )
         st.plotly_chart(fig3, use_container_width=True)
 
     # ==========================================
