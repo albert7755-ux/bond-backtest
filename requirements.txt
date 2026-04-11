@@ -2,4 +2,6 @@ pandas
 numpy
 plotly
 streamlit
-matplotlib
+gspread
+google-auth
+requests
