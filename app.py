@@ -380,7 +380,7 @@ try:
     else:
         bond_info_cache = {}
 
-    # 建立「顯示名稱 → 原始檔名」對照
+    # 建立「顯示名稱 → 原始檔名」對照，並按名稱排序
     def make_display_name(file_name):
         isin = parse_filename(file_name)
         if isin and isin in bond_info_cache:
@@ -393,7 +393,8 @@ try:
         return file_name
 
     display_to_file = {make_display_name(f): f for f in file_names}
-    display_names = list(display_to_file.keys())
+    # 按顯示名稱排序
+    display_names = sorted(display_to_file.keys())
 
 except Exception as e:
     st.error(f"❌ 無法連接 Google Drive：{e}")
