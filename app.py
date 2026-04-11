@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 from datetime import timedelta
 import plotly.graph_objects as go
+import gspread
+from google.oauth2.service_account import Credentials
+import json
 
 st.set_page_config(page_title="債券績效比較", layout="wide", page_icon="📊")
 
@@ -80,40 +83,94 @@ st.markdown("""
 }
 .legend-item { display: flex; align-items: center; gap: 6px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display:inline-block; }
-
-.annual-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.84rem;
-    border-radius: 8px;
-    overflow: hidden;
-}
-.annual-table th {
-    background: #1a2744;
-    color: white;
-    padding: 8px 12px;
-    text-align: center;
-}
-.annual-table th.left { text-align: left; }
-.annual-table td {
-    padding: 7px 12px;
-    text-align: center;
-    border-bottom: 1px solid #f0f0f0;
-}
-.annual-table td.year-col { text-align: left; font-weight: 700; color: #1a2744; }
-.annual-table tr:last-child td { border-bottom: none; }
 </style>
 """, unsafe_allow_html=True)
 
 
 # ==========================================
+# Google Drive 連線
+# ==========================================
+@st.cache_resource
+def get_gspread_client():
+    creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+        "https://www.googleapis.com/auth/drive.readonly"
+    ]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    return gspread.authorize(creds)
+
+@st.cache_data(ttl=300)
+def list_sheets_in_folder(folder_id):
+    """列出資料夾中所有試算表"""
+    client = get_gspread_client()
+    drive = client.auth.authorized_session if hasattr(client, 'auth') else None
+    
+    # 用 gspread 列出資料夾中的檔案
+    import requests
+    from google.oauth2.service_account import Credentials
+    
+    creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+    scopes = ["https://www.googleapis.com/auth/drive.readonly"]
+    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+    
+    # 手動呼叫 Drive API
+    from google.auth.transport.requests import Request
+    creds.refresh(Request())
+    
+    headers = {"Authorization": f"Bearer {creds.token}"}
+    url = f"https://www.googleapis.com/drive/v3/files"
+    params = {
+        "q": f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+        "fields": "files(id, name)",
+    }
+    resp = requests.get(url, headers=headers, params=params)
+    files = resp.json().get("files", [])
+    return files  # [{"id": "...", "name": "..."}]
+
+@st.cache_data(ttl=300)
+def read_sheet(sheet_id):
+    """讀取試算表資料"""
+    client = get_gspread_client()
+    sh = client.open_by_key(sheet_id)
+    ws = sh.get_worksheet(0)
+    data = ws.get_all_records()
+    df = pd.DataFrame(data)
+    df["date"] = pd.to_datetime(df["time"], unit="s")
+    df = df[["date", "close"]].sort_values("date").reset_index(drop=True)
+    return df
+
+def parse_filename(name):
+    """從檔名解析 ISIN、票息、到期年"""
+    # 格式1：US084664CQ25_Berkshire-Hathaway_4.20pct_2048
+    # 格式2：SWB_DLY_US084664CQ25__1D (原始TradingView格式)
+    import re
+    
+    # 嘗試解析 ISIN
+    isin_match = re.search(r'(US[A-Z0-9]{10})', name)
+    isin = isin_match.group(1) if isin_match else ""
+    
+    # 嘗試解析票息
+    coupon_match = re.search(r'(\d+\.?\d*)pct', name)
+    coupon = float(coupon_match.group(1)) if coupon_match else 0.0
+    
+    # 嘗試解析到期年
+    year_match = re.search(r'_(20\d{2})$', name)
+    maturity = year_match.group(1) if year_match else ""
+    
+    # 嘗試解析發行機構
+    issuer = ""
+    if isin and coupon and maturity:
+        parts = name.replace(isin, "").replace(f"{coupon}pct", "").replace(maturity, "")
+        parts = parts.strip("_").strip("-")
+        issuer = parts.strip("_").replace("-", " ").strip()
+    
+    return isin, coupon, maturity, issuer
+
+
+# ==========================================
 # 工具函數
 # ==========================================
-def load_csv(file):
-    df = pd.read_csv(file)
-    df["date"] = pd.to_datetime(df["time"], unit="s")
-    return df[["date", "close"]].sort_values("date").reset_index(drop=True)
-
 def calc_period(df, coupon_rate, days):
     end_date = df["date"].max()
     sub = df[df["date"] >= end_date - timedelta(days=days)]
@@ -143,6 +200,15 @@ def calc_annual(df, coupon_rate):
                      "coupon": coupon_ret, "total": price_ret + coupon_ret})
     return rows
 
+def total_return_index(df, coupon_rate):
+    prices = df["close"].values
+    daily_coupon = (coupon_rate / 100) / 365
+    tri = [100.0]
+    for i in range(1, len(prices)):
+        price_ret = (prices[i] - prices[i-1]) / prices[i-1]
+        tri.append(tri[-1] * (1 + price_ret + daily_coupon))
+    return tri
+
 def fmt(val, bold=False):
     if val is None:
         return '<span class="neu">—</span>'
@@ -151,25 +217,43 @@ def fmt(val, bold=False):
     return f'<span class="{css}"><b>{text}</b></span>' if bold else f'<span class="{css}">{text}</span>'
 
 def color_cell(val):
-    if val is None:
-        return ""
-    if val > 0.0005:
-        return "color:#2e7d32;font-weight:600;"
-    elif val < -0.0005:
-        return "color:#c62828;font-weight:600;"
+    if val is None: return ""
+    if val > 0.0005: return "color:#2e7d32;font-weight:600;"
+    elif val < -0.0005: return "color:#c62828;font-weight:600;"
     return "color:#888;"
 
 
 # ==========================================
-# 介面
+# 主介面
 # ==========================================
 st.markdown("## 📊 債券績效比較工具")
-st.markdown("上傳 TradingView 匯出的 CSV，自動計算並比較各期間總報酬")
+st.markdown("從 Google Drive `bond-data` 資料夾自動讀取，選擇債券後立即比較績效")
 st.markdown("---")
 
+# 讀取資料夾中的試算表清單
+folder_id = st.secrets.get("FOLDER_ID", "")
+
+try:
+    with st.spinner("正在讀取 bond-data 資料夾..."):
+        files = list_sheets_in_folder(folder_id)
+    
+    if not files:
+        st.warning("⚠️ bond-data 資料夾中沒有試算表，請先上傳 CSV 並確認已轉換為 Google 試算表格式。")
+        st.stop()
+    
+    # 建立選單選項
+    file_options = {f["name"]: f["id"] for f in files}
+    file_names = list(file_options.keys())
+
+except Exception as e:
+    st.error(f"❌ 無法連接 Google Drive：{e}")
+    st.stop()
+
+# 選檔數
 n = st.radio("比較幾檔債券？", [2, 3, 4, 5, 6], horizontal=True)
 st.markdown("---")
 
+# 動態產生選單
 bonds = []
 cols = st.columns(n)
 for i in range(n):
@@ -177,14 +261,47 @@ for i in range(n):
         color = COLORS[i]
         label = LABELS[i]
         st.markdown(f'<span class="bond-tag" style="background:{color}">債券 {label}</span>', unsafe_allow_html=True)
-        file = st.file_uploader(f"上傳 CSV", type="csv", key=f"file_{i}")
-        name = st.text_input("債券名稱", value="", placeholder="例：Apple 3% 2027", key=f"name_{i}")
-        coupon = st.number_input("票息率 (%)", value=0.0, step=0.01, min_value=0.0, max_value=20.0, key=f"coupon_{i}")
-        bonds.append({"file": file, "name": name or f"債券{label}", "coupon": coupon, "color": color, "label": label})
+        
+        selected = st.selectbox(
+            f"選擇債券",
+            options=["（請選擇）"] + file_names,
+            key=f"sel_{i}"
+        )
+        
+        # 從檔名自動解析資訊
+        if selected != "（請選擇）":
+            isin, auto_coupon, maturity, issuer = parse_filename(selected)
+            default_name = f"{issuer} {auto_coupon}% {maturity}".strip() if issuer else selected
+            default_coupon = auto_coupon
+        else:
+            default_name = ""
+            default_coupon = 0.0
+        
+        name = st.text_input("債券名稱", value=default_name, placeholder="例：Apple 3% 2027", key=f"name_{i}")
+        coupon = st.number_input("票息率 (%)", value=default_coupon, step=0.01, min_value=0.0, max_value=20.0, key=f"coupon_{i}")
+        
+        sheet_id = file_options.get(selected) if selected != "（請選擇）" else None
+        bonds.append({
+            "sheet_id": sheet_id,
+            "name": name or f"債券{label}",
+            "coupon": coupon,
+            "color": color,
+            "label": label,
+            "selected": selected
+        })
 
 st.markdown("---")
 
-loaded = [(b, load_csv(b["file"])) for b in bonds if b["file"] is not None]
+# 讀取選中的試算表
+loaded = []
+for b in bonds:
+    if b["sheet_id"]:
+        try:
+            with st.spinner(f"讀取 {b['selected']}..."):
+                df = read_sheet(b["sheet_id"])
+            loaded.append((b, df))
+        except Exception as e:
+            st.error(f"❌ 讀取 {b['selected']} 失敗：{e}")
 
 if loaded:
     periods = [("1個月",30),("3個月",90),("6個月",180),
@@ -230,12 +347,12 @@ if loaded:
     # 勝出統計
     wins = [0] * len(all_data)
     for period_label, _ in periods:
-        totals = [all_data[i][1].get(period_label) for i in range(len(all_data))]
-        valid = [(i, r["total"]) for i, r in enumerate(totals) if r]
+        valid = [(i, all_data[i][1].get(period_label)) for i in range(len(all_data))]
+        valid = [(i, r) for i, r in valid if r]
         if valid:
-            best = max(t for _, t in valid)
-            for i, t in valid:
-                if t >= best - 0.0001:
+            best = max(r["total"] for _, r in valid)
+            for i, r in valid:
+                if r["total"] >= best - 0.0001:
                     wins[i] += 1
 
     html += '<tr style="background:#1a2744;"><td class="period-col" style="background:#1a2744;color:#ffd700;font-weight:700;">🏆 勝出</td>'
@@ -274,71 +391,38 @@ if loaded:
     # ==========================================
     st.markdown("---")
     st.subheader("📈 價格走勢圖")
-
-    tab1, tab2, tab3 = st.tabs([
-        "📊 標準化（不含息）",
-        "📊 標準化（含息）",
-        "💰 實際價格",
-    ])
-
-    def total_return_index(df, coupon_rate):
-        """計算含息總報酬指數（起始=100）"""
-        prices = df["close"].values
-        daily_coupon = (coupon_rate / 100) / 365
-        tri = [100.0]
-        for i in range(1, len(prices)):
-            price_ret = (prices[i] - prices[i-1]) / prices[i-1]
-            tri.append(tri[-1] * (1 + price_ret + daily_coupon))
-        return tri
+    tab1, tab2, tab3 = st.tabs(["📊 標準化（不含息）", "📊 標準化（含息）", "💰 實際價格"])
 
     with tab1:
-        st.info("📌 此圖為純價格走勢，**不含票息**。起始日設為100，僅反映債券市價的漲跌幅度。若要看含票息的真實報酬，請切換至「標準化（含息）」。")
+        st.info("📌 純價格走勢，**不含票息**。起始=100，僅反映債券市價漲跌。")
         fig = go.Figure()
         for b, df in loaded:
             norm = df["close"] / df["close"].iloc[0] * 100
-            fig.add_trace(go.Scatter(
-                x=df["date"], y=norm,
-                name=f'{b["label"]}. {b["name"]}',
-                line=dict(color=b["color"], width=2)
-            ))
-        fig.update_layout(
-            yaxis_title="相對價格（起始=100，不含息）",
-            hovermode="x unified", height=430,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02)
-        )
+            fig.add_trace(go.Scatter(x=df["date"], y=norm, name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)))
+        fig.update_layout(yaxis_title="相對價格（起始=100，不含息）", hovermode="x unified", height=430,
+                          legend=dict(orientation="h", yanchor="bottom", y=1.02))
         st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        st.info("📌 此圖為**含票息**的總報酬指數（Total Return Index）。起始=100，每日將票息（年票息率 ÷ 365）累積計入，完整反映持有人實際拿到的報酬，包含每天滴入的利息收益。")
+        st.info("📌 **含票息**的總報酬指數。起始=100，每日將票息（年票息率 ÷ 365）累積計入，完整反映持有人實際拿到的報酬。")
         fig2 = go.Figure()
         for b, df in loaded:
             tri = total_return_index(df, b["coupon"])
-            fig2.add_trace(go.Scatter(
-                x=df["date"], y=tri,
-                name=f'{b["label"]}. {b["name"]}',
-                line=dict(color=b["color"], width=2)
-            ))
-        fig2.update_layout(
-            yaxis_title="總報酬指數（起始=100，含息）",
-            hovermode="x unified", height=430,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02)
-        )
+            fig2.add_trace(go.Scatter(x=df["date"], y=tri, name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)))
+        fig2.update_layout(yaxis_title="總報酬指數（起始=100，含息）", hovermode="x unified", height=430,
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
         st.plotly_chart(fig2, use_container_width=True)
 
     with tab3:
-        st.info("📌 此圖為 TradingView 的原始收盤價，以面值 100 為基準。**不含票息**，直接反映市場對該債券的定價。")
+        st.info("📌 TradingView 原始收盤價，面值100為基準，**不含票息**。")
         fig3 = go.Figure()
         for b, df in loaded:
-            fig3.add_trace(go.Scatter(
-                x=df["date"], y=df["close"],
-                name=f'{b["label"]}. {b["name"]}',
-                line=dict(color=b["color"], width=2)
-            ))
-        fig3.update_layout(
-            yaxis_title="價格（面值100）",
-            hovermode="x unified", height=430,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02)
-        )
+            fig3.add_trace(go.Scatter(x=df["date"], y=df["close"], name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)))
+        fig3.update_layout(yaxis_title="價格（面值100）", hovermode="x unified", height=430,
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
         st.plotly_chart(fig3, use_container_width=True)
 
     # ==========================================
@@ -347,42 +431,42 @@ if loaded:
     st.markdown("---")
     st.subheader("📅 年度報酬回顧")
 
-    # 收集所有年份
     all_annual = [(b, calc_annual(df, b["coupon"])) for b, df in loaded]
     all_years = sorted(set(r["year"] for _, rows in all_annual for r in rows), reverse=True)
 
-    ann_html = '<table class="annual-table"><thead><tr><th class="left">年度</th>'
+    ann_html = '<table style="width:100%;border-collapse:collapse;font-size:0.84rem;border-radius:8px;overflow:hidden;">'
+    ann_html += '<thead><tr><th style="background:#1a2744;color:white;padding:8px 12px;text-align:left;">年度</th>'
     for b, _ in all_annual:
         short = b["name"][:12] + ("…" if len(b["name"]) > 12 else "")
-        ann_html += f'<th style="background:{b["color"]};">{b["label"]}. {short}<br><small style="font-weight:400;opacity:.85">價格漲跌</small></th>'
-        ann_html += f'<th style="background:{b["color"]};">票息收益</th>'
-        ann_html += f'<th style="background:{b["color"]};">總報酬 ★</th>'
+        ann_html += f'<th style="background:{b["color"]};color:white;padding:8px 12px;text-align:center;">{b["label"]}. {short}<br><small style="font-weight:400;">價格漲跌</small></th>'
+        ann_html += f'<th style="background:{b["color"]};color:white;padding:8px 12px;text-align:center;">票息收益</th>'
+        ann_html += f'<th style="background:{b["color"]};color:white;padding:8px 12px;text-align:center;">總報酬 ★</th>'
     ann_html += "</tr></thead><tbody>"
 
     for year in all_years:
-        ann_html += f'<tr><td class="year-col">{year}</td>'
+        ann_html += f'<tr><td style="padding:7px 12px;font-weight:700;color:#1a2744;border-bottom:1px solid #f0f0f0;">{year}</td>'
         for b, rows in all_annual:
             row = next((r for r in rows if r["year"] == year), None)
             if row:
-                ann_html += f'<td style="{color_cell(row["price"])}">{row["price"]:+.2%}</td>'
-                ann_html += f'<td style="color:#2e7d32;">{row["coupon"]:+.2%}</td>'
-                ann_html += f'<td style="{color_cell(row["total"])};font-weight:700;">{row["total"]:+.2%}</td>'
+                ann_html += f'<td style="padding:7px 12px;text-align:center;border-bottom:1px solid #f0f0f0;{color_cell(row["price"])}">{row["price"]:+.2%}</td>'
+                ann_html += f'<td style="padding:7px 12px;text-align:center;border-bottom:1px solid #f0f0f0;color:#2e7d32;">{row["coupon"]:+.2%}</td>'
+                ann_html += f'<td style="padding:7px 12px;text-align:center;border-bottom:1px solid #f0f0f0;{color_cell(row["total"])}font-weight:700;">{row["total"]:+.2%}</td>'
             else:
-                ann_html += '<td colspan="3" style="color:#ccc;">無資料</td>'
+                ann_html += '<td colspan="3" style="text-align:center;color:#ccc;border-bottom:1px solid #f0f0f0;">無資料</td>'
         ann_html += "</tr>"
 
     ann_html += "</tbody></table>"
     st.markdown(ann_html, unsafe_allow_html=True)
 
 else:
-    st.info("👆 請至少上傳一檔債券的 CSV 開始分析")
+    st.info("👆 請在上方選擇至少一檔債券開始分析")
     st.markdown("""
-    **如何從 TradingView 取得 CSV？**
-    1. 登入 TradingView（需 Plus 以上方案）
-    2. 搜尋債券 ISIN（例如 `US084664CQ25`）
-    3. 開啟圖表，時間軸往左捲到最左邊（取得最長歷史）
-    4. 右上角選單 → **匯出圖表資料...**
-    5. 下載後上傳到這裡
+    **如何新增債券資料？**
+    1. 在 TradingView 搜尋債券 ISIN（需 Plus 以上方案）
+    2. 開啟圖表，時間軸往左捲到最左邊
+    3. 右上角選單 → **匯出圖表資料...**
+    4. 上傳 CSV 到 Google 雲端硬碟的 `bond-data` 資料夾
+    5. 重新整理此頁面，下拉選單會自動更新！
     """)
 
 st.markdown("---")
