@@ -183,7 +183,7 @@ def parse_filename(name):
             return isin
 
     # 再從檔名抓 ISIN（支援 US 和 XS 開頭，12碼）
-    isin_match = re.search(r'\b([A-Z]{2}[A-Z0-9]{10})\b', name)
+    isin_match = re.search(r'([A-Z]{2}[A-Z0-9]{10})', name)
     if isin_match:
         return isin_match.group(1)
 
