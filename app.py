@@ -141,31 +141,65 @@ def read_sheet(sheet_id):
     return df
 
 def parse_filename(name):
-    """從檔名解析 ISIN、票息、到期年"""
-    # 格式1：US084664CQ25_Berkshire-Hathaway_4.20pct_2048
-    # 格式2：SWB_DLY_US084664CQ25__1D (原始TradingView格式)
+    """從檔名解析 ISIN"""
     import re
-    
-    # 嘗試解析 ISIN
     isin_match = re.search(r'(US[A-Z0-9]{10})', name)
     isin = isin_match.group(1) if isin_match else ""
-    
-    # 嘗試解析票息
-    coupon_match = re.search(r'(\d+\.?\d*)pct', name)
-    coupon = float(coupon_match.group(1)) if coupon_match else 0.0
-    
-    # 嘗試解析到期年
-    year_match = re.search(r'_(20\d{2})$', name)
-    maturity = year_match.group(1) if year_match else ""
-    
-    # 嘗試解析發行機構
-    issuer = ""
-    if isin and coupon and maturity:
-        parts = name.replace(isin, "").replace(f"{coupon}pct", "").replace(maturity, "")
-        parts = parts.strip("_").strip("-")
-        issuer = parts.strip("_").replace("-", " ").strip()
-    
-    return isin, coupon, maturity, issuer
+    return isin
+
+@st.cache_data(ttl=86400)
+def lookup_bond_info(isin):
+    """用 ISIN 上網查債券基本資料（發行機構、票息、到期年）"""
+    import requests, re
+    try:
+        url = f"https://bondblox.com/bond-market/{isin}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp = requests.get(url, headers=headers, timeout=8)
+        text = resp.text
+
+        # 抓票息
+        coupon_match = re.search(r'"coupon"[:\s]+"?([\d.]+)%?"?', text)
+        if not coupon_match:
+            coupon_match = re.search(r'(\d+\.?\d+)%\s*\d{4}', text)
+        coupon = float(coupon_match.group(1)) if coupon_match else 0.0
+
+        # 抓到期年
+        maturity_match = re.search(r'(\d{2}/\d{2}/\d{4})', text)
+        if maturity_match:
+            maturity = maturity_match.group(1).split("/")[-1]
+        else:
+            maturity_match = re.search(r'(20\d{2})', text)
+            maturity = maturity_match.group(1) if maturity_match else ""
+
+        # 抓發行機構（從 title）
+        title_match = re.search(r'<title>(.*?)</title>', text)
+        issuer = ""
+        if title_match:
+            title = title_match.group(1)
+            issuer_match = re.match(r'^([\w\s\-\.]+?)\s+\d', title)
+            if issuer_match:
+                issuer = issuer_match.group(1).strip()
+
+        if coupon > 0 and maturity:
+            return {"issuer": issuer, "coupon": coupon, "maturity": maturity}
+    except:
+        pass
+
+    # 備用：用 cbonds 抓
+    try:
+        url2 = f"https://cbonds.com/bonds/?search={isin}"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        resp2 = requests.get(url2, headers=headers, timeout=8)
+        text2 = resp2.text
+        coupon_match = re.search(r'(\d+\.?\d+)%', text2)
+        coupon = float(coupon_match.group(1)) if coupon_match else 0.0
+        maturity_match = re.search(r'(20\d{2})', text2)
+        maturity = maturity_match.group(1) if maturity_match else ""
+        return {"issuer": isin, "coupon": coupon, "maturity": maturity}
+    except:
+        pass
+
+    return {"issuer": isin, "coupon": 0.0, "maturity": ""}
 
 
 # ==========================================
@@ -267,18 +301,29 @@ for i in range(n):
             options=["（請選擇）"] + file_names,
             key=f"sel_{i}"
         )
-        
-        # 從檔名自動解析資訊
+
+        # 從檔名抓 ISIN，再自動查詢債券資訊
         if selected != "（請選擇）":
-            isin, auto_coupon, maturity, issuer = parse_filename(selected)
-            default_name = f"{issuer} {auto_coupon}% {maturity}".strip() if issuer else selected
-            default_coupon = auto_coupon
+            isin = parse_filename(selected)
+            if isin:
+                with st.spinner(f"查詢 {isin} 基本資料..."):
+                    info = lookup_bond_info(isin)
+                issuer = info["issuer"]
+                auto_coupon = info["coupon"]
+                maturity = info["maturity"]
+                default_name = f"{issuer} {auto_coupon}% {maturity}".strip() if issuer else selected
+                default_coupon = auto_coupon
+                if auto_coupon > 0:
+                    st.success(f"✅ {isin}｜{issuer}｜票息 {auto_coupon}%｜到期 {maturity}")
+            else:
+                default_name = selected
+                default_coupon = 0.0
         else:
             default_name = ""
             default_coupon = 0.0
-        
-        name = st.text_input("債券名稱", value=default_name, placeholder="例：Apple 3% 2027", key=f"name_{i}")
-        coupon = st.number_input("票息率 (%)", value=default_coupon, step=0.01, min_value=0.0, max_value=20.0, key=f"coupon_{i}")
+
+        name = st.text_input("債券名稱（可修改）", value=default_name, placeholder="例：Apple 3% 2027", key=f"name_{i}")
+        coupon = st.number_input("票息率 % （可修改）", value=default_coupon, step=0.01, min_value=0.0, max_value=20.0, key=f"coupon_{i}")
         
         sheet_id = file_options.get(selected) if selected != "（請選擇）" else None
         bonds.append({
