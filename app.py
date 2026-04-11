@@ -147,76 +147,110 @@ def parse_filename(name):
     isin = isin_match.group(1) if isin_match else ""
     return isin
 
-@st.cache_data(ttl=86400)
+LOCAL_DB = {
+    "US02079KBP12": {"issuer": "Alphabet 公司債6", "coupon": 5.65, "maturity": "2056"},
+    "US30303MAE21": {"issuer": "Meta平台公司債9", "coupon": 5.625, "maturity": "2055"},
+    "US64110LBA35": {"issuer": "網飛公司債3", "coupon": 5.4, "maturity": "2054"},
+    "US03769MAC01": {"issuer": "阿波羅全球公司債1", "coupon": 5.8, "maturity": "2054"},
+    "US191216DS69": {"issuer": "可口可樂公司債5", "coupon": 5.3, "maturity": "2054"},
+    "US92343VGW81": {"issuer": "威瑞森電信公司債12", "coupon": 5.5, "maturity": "2054"},
+    "XS2747599509": {"issuer": "沙烏地阿拉伯債7", "coupon": 5.75, "maturity": "2054"},
+    "US29736RAU41": {"issuer": "雅詩蘭黛公司債3", "coupon": 5.15, "maturity": "2053"},
+    "US037833EW60": {"issuer": "蘋果公司債14", "coupon": 4.85, "maturity": "2053"},
+    "US91324PEW86": {"issuer": "聯合健康集團債9", "coupon": 5.05, "maturity": "2053"},
+    "US532457CG18": {"issuer": "禮來公司債1", "coupon": 4.875, "maturity": "2053"},
+    "US91324PES74": {"issuer": "聯合健康集團債5", "coupon": 5.875, "maturity": "2053"},
+    "US459200KZ37": {"issuer": "國際商業機器債4", "coupon": 5.1, "maturity": "2053"},
+    "US459200KV23": {"issuer": "國際商業機器公司債1", "coupon": 4.9, "maturity": "2052"},
+    "US45866FAX24": {"issuer": "洲際交易所公司債1", "coupon": 4.95, "maturity": "2052"},
+    "US872898AJ06": {"issuer": "TSMC公司債 4", "coupon": 4.5, "maturity": "2052"},
+    "US084664DB47": {"issuer": "波克夏金融公司債2", "coupon": 3.85, "maturity": "2052"},
+    "US92343VGP31": {"issuer": "威瑞森電信公司債11", "coupon": 3.875, "maturity": "2052"},
+    "US828807DJ39": {"issuer": "賽門房地產集團債1", "coupon": 3.8, "maturity": "2050"},
+    "US191216CQ13": {"issuer": "可口可樂公司債2", "coupon": 4.2, "maturity": "2050"},
+    "US92343VFD10": {"issuer": "威瑞森電信公司債9", "coupon": 4.0, "maturity": "2050"},
+    "US254687FM36": {"issuer": "迪士尼公司債2", "coupon": 2.75, "maturity": "2049"},
+    "XS1982116136": {"issuer": "沙烏地阿拉伯石油公司債4", "coupon": 4.375, "maturity": "2049"},
+    "US58933YAW57": {"issuer": "默克藥廠公司債1", "coupon": 4.0, "maturity": "2049"},
+    "US125523AK66": {"issuer": "信諾公司債1", "coupon": 4.9, "maturity": "2048"},
+    "US88579YBD22": {"issuer": "3M 公司債1", "coupon": 4.0, "maturity": "2048"},
+    "US084664CQ25": {"issuer": "波克夏海瑟威金融公司債1", "coupon": 4.2, "maturity": "2048"},
+    "XS1807174559": {"issuer": "卡達政府國際債1", "coupon": 5.103, "maturity": "2048"},
+    "US023135BJ40": {"issuer": "亞馬遜公司債1", "coupon": 4.05, "maturity": "2047"},
+    "US375558BK80": {"issuer": "吉利德科學公司債1", "coupon": 4.15, "maturity": "2047"},
+    "US037833CH12": {"issuer": "蘋果公司債6", "coupon": 4.25, "maturity": "2047"},
+    "US002824BH26": {"issuer": "亞培公司債2", "coupon": 4.9, "maturity": "2046"},
+    "XS1508675508": {"issuer": "沙烏地阿拉伯政府國際債券5", "coupon": 4.5, "maturity": "2046"},
+    "US02209SAV51": {"issuer": "高特利集團公司債1", "coupon": 3.875, "maturity": "2046"},
+    "US92343VCK89": {"issuer": "威瑞森電信公司債1", "coupon": 4.862, "maturity": "2046"},
+    "US594918BT09": {"issuer": "微軟公司債2", "coupon": 3.7, "maturity": "2046"},
+    "US125523CF53": {"issuer": "信諾公司債2", "coupon": 4.8, "maturity": "2046"},
+    "US20030NBU46": {"issuer": "康卡斯特公司債1", "coupon": 3.4, "maturity": "2046"},
+    "US375558BD48": {"issuer": "吉利德科學公司債2", "coupon": 4.75, "maturity": "2046"},
+    "US02079KBN63": {"issuer": "Alphabet 公司債5", "coupon": 5.5, "maturity": "2046"},
+    "US30303M8X35": {"issuer": "Meta平台公司債10", "coupon": 5.5, "maturity": "2045"},
+    "US747525AK99": {"issuer": "高通公司債3", "coupon": 4.8, "maturity": "2045"},
+    "US25468PDB94": {"issuer": "華德迪士尼公司債1", "coupon": 4.125, "maturity": "2044"},
+    "US717081DK61": {"issuer": "輝瑞藥廠公司債2", "coupon": 4.4, "maturity": "2044"},
+    "US449276AF17": {"issuer": "IBM金融公司債1", "coupon": 5.25, "maturity": "2044"},
+    "US02209SAR40": {"issuer": "高特利集團公司債2", "coupon": 5.375, "maturity": "2044"},
+    "US12572QAF28": {"issuer": "芝加哥期交所債1", "coupon": 5.3, "maturity": "2043"},
+    "US037833AL42": {"issuer": "蘋果公司債2", "coupon": 3.85, "maturity": "2043"},
+    "US084670BK32": {"issuer": "波克夏公司債1", "coupon": 4.5, "maturity": "2043"},
+    "US594918BZ68": {"issuer": "微軟公司債7", "coupon": 4.1, "maturity": "2037"},
+    "US717081EC37": {"issuer": "輝瑞藥廠公司債1", "coupon": 4.0, "maturity": "2036"},
+    "US035242AM81": {"issuer": "百威英博(金融)公司債2", "coupon": 4.7, "maturity": "2036"},
+    "US91159HJN17": {"issuer": "美國合眾銀公司債2", "coupon": 5.836, "maturity": "2034"},
+    "US55608KBG94": {"issuer": "麥格理集團公司債10", "coupon": 5.491, "maturity": "2033"},
+    "US686330AR22": {"issuer": "歐力士公司債2", "coupon": 5.2, "maturity": "2032"},
+    "USG91139AL26": {"issuer": "TSMC全球公司債6", "coupon": 4.625, "maturity": "2032"},
+    "US92556HAC16": {"issuer": "維康公司債3", "coupon": 4.95, "maturity": "2050"},
+    "US31428XCA28": {"issuer": "聯邦快遞公司債1", "coupon": 5.25, "maturity": "2050"},
+    "US09062XAG88": {"issuer": "生物基因公司債2", "coupon": 3.15, "maturity": "2050"},
+    "US37045VAT70": {"issuer": "通用汽車公司債7", "coupon": 5.95, "maturity": "2049"},
+    "US854502AJ02": {"issuer": "史丹利百得公司債3", "coupon": 4.85, "maturity": "2048"},
+    "US00206RCU41": {"issuer": "AT&T公司債12", "coupon": 5.65, "maturity": "2047"},
+    "US94974BGU89": {"issuer": "富國銀行公司債10", "coupon": 4.75, "maturity": "2046"},
+    "US172967KR13": {"issuer": "花旗集團公司債14", "coupon": 4.75, "maturity": "2046"},
+    "US00206RCQ39": {"issuer": "AT&T公司債5", "coupon": 4.75, "maturity": "2046"},
+    "US58013MFA71": {"issuer": "麥當勞公司債2", "coupon": 4.875, "maturity": "2045"},
+    "US42824CAY57": {"issuer": "慧與公司債1", "coupon": 6.35, "maturity": "2045"},
+    "US09062XAD57": {"issuer": "生物基因公司債1", "coupon": 5.2, "maturity": "2045"},
+    "US37045VAJ98": {"issuer": "通用汽車公司債4", "coupon": 5.2, "maturity": "2045"},
+    "US61747YDY86": {"issuer": "摩根士丹利債20", "coupon": 4.3, "maturity": "2045"},
+    "US94974BGE48": {"issuer": "富國銀行債9", "coupon": 4.65, "maturity": "2044"},
+    "US172967HS33": {"issuer": "花旗集團債12", "coupon": 5.3, "maturity": "2044"},
+    "XS1049699926": {"issuer": "渣打集團債6", "coupon": 5.7, "maturity": "2044"},
+    "US404280AQ21": {"issuer": "匯豐控股公司債8", "coupon": 5.25, "maturity": "2044"},
+    "US37045VAF76": {"issuer": "通用汽車公司債3", "coupon": 6.25, "maturity": "2043"},
+    "US92553PAP71": {"issuer": "維康公司債2", "coupon": 4.375, "maturity": "2043"},
+    "US00206RBH49": {"issuer": "AT&T公司債1", "coupon": 4.3, "maturity": "2042"},
+    "US71568QAB32": {"issuer": "印尼國家電力債2", "coupon": 5.25, "maturity": "2042"},
+    "US854502AA92": {"issuer": "史丹利百得公司債2", "coupon": 5.2, "maturity": "2040"},
+    "US50076QAN60": {"issuer": "卡夫亨氏公司債1", "coupon": 6.5, "maturity": "2040"},
+    "XS2885079702": {"issuer": "國泰人壽公司債2", "coupon": 5.3, "maturity": "2039"},
+    "US46625HHF01": {"issuer": "摩根大通銀行債3", "coupon": 6.4, "maturity": "2038"},
+    "US37045VAP58": {"issuer": "通用汽車公司債2", "coupon": 5.15, "maturity": "2038"},
+    "US126650CY46": {"issuer": "CVS公司債1", "coupon": 4.78, "maturity": "2038"},
+    "US38141GFD16": {"issuer": "美高盛公司債14", "coupon": 6.75, "maturity": "2037"},
+    "US00206RDR03": {"issuer": "AT&T公司債3", "coupon": 5.25, "maturity": "2037"},
+    "US404280AG49": {"issuer": "匯豐銀行公司債4", "coupon": 6.5, "maturity": "2036"},
+    "US38143YAC75": {"issuer": "美商高盛證券公司債16", "coupon": 6.45, "maturity": "2036"},
+    "US925524AX89": {"issuer": "維康公司債1", "coupon": 6.875, "maturity": "2036"},
+    "US37045VAK61": {"issuer": "通用汽車公司債1", "coupon": 6.6, "maturity": "2036"},
+    "XS3151416727": {"issuer": "富邦人壽(新加坡)1", "coupon": 5.45, "maturity": "2035"},
+    "US06051GLU12": {"issuer": "美國銀行公司債6", "coupon": 5.872, "maturity": "2034"},
+    "XS2852920342": {"issuer": "國泰人壽公司債1", "coupon": 5.95, "maturity": "2034"},
+    "US458140CA64": {"issuer": "英特爾公司債5", "coupon": 4.15, "maturity": "2032"},
+}
+
 def batch_lookup_bond_info(isin_list):
-    """用 OpenFIGI API 批次查詢多個 ISIN 的債券資訊（免費，無限制）"""
-    import requests, re
-
-    result = {}
-    # OpenFIGI 每次最多 50 個
-    chunk_size = 50
-    chunks = [isin_list[i:i+chunk_size] for i in range(0, len(isin_list), chunk_size)]
-
-    for chunk in chunks:
-        payload = [{"idType": "ID_ISIN", "idValue": isin} for isin in chunk]
-        try:
-            resp = requests.post(
-                "https://api.openfigi.com/v3/mapping",
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=15
-            )
-            data = resp.json()
-            for i, item in enumerate(data):
-                isin = chunk[i]
-                if "data" in item and item["data"]:
-                    # 找到 Corp 類型的
-                    bond_data = None
-                    for d in item["data"]:
-                        if d.get("marketSector") in ["Corp", "Govt", "Mtge"]:
-                            bond_data = d
-                            break
-                    if not bond_data:
-                        bond_data = item["data"][0]
-
-                    name = bond_data.get("name", isin)
-                    sec_des = bond_data.get("securityDes", "")
-
-                    # 從 securityDes 解析票息和到期年（格式如：BRK/B 4.2 08/15/48）
-                    coupon = 0.0
-                    maturity = ""
-                    if sec_des:
-                        coupon_match = re.search(r'(\d+\.?\d+)\s+\d{2}/\d{2}/\d{2}', sec_des)
-                        if coupon_match:
-                            coupon = float(coupon_match.group(1))
-                        maturity_match = re.search(r'\d{2}/\d{2}/(\d{2})$', sec_des)
-                        if maturity_match:
-                            yr = int(maturity_match.group(1))
-                            maturity = str(2000 + yr) if yr < 50 else str(1900 + yr)
-
-                    # 備用：從 ticker 解析
-                    if coupon == 0.0:
-                        ticker = bond_data.get("ticker", "")
-                        coupon_match = re.search(r'(\d+\.?\d+)', ticker)
-                        if coupon_match:
-                            coupon = float(coupon_match.group(1))
-
-                    result[isin] = {
-                        "issuer": name,
-                        "coupon": coupon,
-                        "maturity": maturity
-                    }
-                else:
-                    result[isin] = {"issuer": isin, "coupon": 0.0, "maturity": ""}
-        except Exception as e:
-            for isin in chunk:
-                result[isin] = {"issuer": isin, "coupon": 0.0, "maturity": ""}
-
-    return result
+    """從本地對照表查詢（94檔完整資料）"""
+    return {isin: LOCAL_DB.get(isin, {"issuer": isin, "coupon": 0.0, "maturity": ""}) for isin in isin_list}
 
 def lookup_bond_info(isin):
-    """單一 ISIN 查詢（從批次快取取值）"""
-    return batch_lookup_bond_info(tuple([isin])).get(isin, {"issuer": isin, "coupon": 0.0, "maturity": ""})
+    """單一 ISIN 查詢"""
+    return LOCAL_DB.get(isin, {"issuer": isin, "coupon": 0.0, "maturity": ""})
 
 
 # ==========================================
