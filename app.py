@@ -508,46 +508,51 @@ if loaded:
     all_min_date = min(df["date"].min() for _, df in loaded).date()
     all_max_date = max(df["date"].max() for _, df in loaded).date()
 
-    # 日期範圍選擇
     from datetime import date, timedelta
     today = all_max_date
 
-    # 快速選擇按鈕（放在日期選擇器上方）
+    # 初始化 session_state
+    if "chart_start" not in st.session_state:
+        st.session_state["chart_start"] = all_min_date
+    if "chart_end" not in st.session_state:
+        st.session_state["chart_end"] = all_max_date
+
+    # 快速選擇按鈕
     st.markdown("**快速選擇區間：**")
     qcol1, qcol2, qcol3, qcol4, qcol5 = st.columns(5)
     if qcol1.button("1年"):
-        st.session_state["chart_start_val"] = today - timedelta(days=365)
+        st.session_state["chart_start"] = max(today - timedelta(days=365), all_min_date)
+        st.rerun()
     if qcol2.button("2年"):
-        st.session_state["chart_start_val"] = today - timedelta(days=730)
+        st.session_state["chart_start"] = max(today - timedelta(days=730), all_min_date)
+        st.rerun()
     if qcol3.button("3年"):
-        st.session_state["chart_start_val"] = today - timedelta(days=1095)
+        st.session_state["chart_start"] = max(today - timedelta(days=1095), all_min_date)
+        st.rerun()
     if qcol4.button("5年"):
-        st.session_state["chart_start_val"] = today - timedelta(days=1825)
+        st.session_state["chart_start"] = max(today - timedelta(days=1825), all_min_date)
+        st.rerun()
     if qcol5.button("全部"):
-        st.session_state["chart_start_val"] = all_min_date
-
-    # 預設起始日
-    default_start = st.session_state.get("chart_start_val", all_min_date)
-    if default_start < all_min_date:
-        default_start = all_min_date
+        st.session_state["chart_start"] = all_min_date
+        st.rerun()
 
     date_col1, date_col2 = st.columns(2)
     with date_col1:
         chart_start = st.date_input(
             "📅 圖表起始日",
-            value=default_start,
+            value=st.session_state["chart_start"],
             min_value=all_min_date,
             max_value=all_max_date,
-            key="chart_start"
         )
+        st.session_state["chart_start"] = chart_start
     with date_col2:
         chart_end = st.date_input(
             "📅 圖表結束日",
-            value=all_max_date,
+            value=st.session_state["chart_end"],
             min_value=all_min_date,
             max_value=all_max_date,
-            key="chart_end"
         )
+        st.session_state["chart_end"] = chart_end
 
     # 篩選後的 loaded
     chart_start_ts = pd.Timestamp(chart_start)
