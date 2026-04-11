@@ -149,53 +149,32 @@ def parse_filename(name):
 
 @st.cache_data(ttl=86400)
 def lookup_bond_info(isin):
-    """用 ISIN 上網查債券基本資料（發行機構、票息、到期年）"""
+    """查詢債券基本資料，先查本地對照表，查不到再上網"""
     import requests, re
+
+    # 本地對照表（常用債券直接寫死，最穩定）
+    LOCAL_DB = {
+        "US084664CQ25": {"issuer": "Berkshire Hathaway", "coupon": 4.20, "maturity": "2048"},
+        "US88579YBD22": {"issuer": "3M",                 "coupon": 4.00, "maturity": "2048"},
+        # 之後新增債券直接在這裡加一行
+    }
+
+    if isin in LOCAL_DB:
+        return LOCAL_DB[isin]
+
+    # 查不到就上網抓（備用）
     try:
-        url = f"https://bondblox.com/bond-market/{isin}"
         headers = {"User-Agent": "Mozilla/5.0"}
+        # 用 cbonds 搜尋
+        url = f"https://cbonds.com/bonds/?search={isin}"
         resp = requests.get(url, headers=headers, timeout=8)
         text = resp.text
-
-        # 抓票息
-        coupon_match = re.search(r'"coupon"[:\s]+"?([\d.]+)%?"?', text)
-        if not coupon_match:
-            coupon_match = re.search(r'(\d+\.?\d+)%\s*\d{4}', text)
+        coupon_match = re.search(r'(\d+\.?\d+)%', text)
         coupon = float(coupon_match.group(1)) if coupon_match else 0.0
-
-        # 抓到期年
-        maturity_match = re.search(r'(\d{2}/\d{2}/\d{4})', text)
-        if maturity_match:
-            maturity = maturity_match.group(1).split("/")[-1]
-        else:
-            maturity_match = re.search(r'(20\d{2})', text)
-            maturity = maturity_match.group(1) if maturity_match else ""
-
-        # 抓發行機構（從 title）
-        title_match = re.search(r'<title>(.*?)</title>', text)
-        issuer = ""
-        if title_match:
-            title = title_match.group(1)
-            issuer_match = re.match(r'^([\w\s\-\.]+?)\s+\d', title)
-            if issuer_match:
-                issuer = issuer_match.group(1).strip()
-
-        if coupon > 0 and maturity:
-            return {"issuer": issuer, "coupon": coupon, "maturity": maturity}
-    except:
-        pass
-
-    # 備用：用 cbonds 抓
-    try:
-        url2 = f"https://cbonds.com/bonds/?search={isin}"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp2 = requests.get(url2, headers=headers, timeout=8)
-        text2 = resp2.text
-        coupon_match = re.search(r'(\d+\.?\d+)%', text2)
-        coupon = float(coupon_match.group(1)) if coupon_match else 0.0
-        maturity_match = re.search(r'(20\d{2})', text2)
+        maturity_match = re.search(r'(20\d{2})', text)
         maturity = maturity_match.group(1) if maturity_match else ""
-        return {"issuer": isin, "coupon": coupon, "maturity": maturity}
+        if coupon > 0:
+            return {"issuer": isin, "coupon": coupon, "maturity": maturity}
     except:
         pass
 
