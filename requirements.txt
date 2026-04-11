@@ -3,5 +3,3 @@ numpy
 plotly
 streamlit
 matplotlib
-yfinance
-xlsxwriter
