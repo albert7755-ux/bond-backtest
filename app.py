@@ -141,11 +141,53 @@ def read_sheet(sheet_id):
     return df
 
 def parse_filename(name):
-    """從檔名解析 ISIN（支援 US 和 XS 開頭）"""
+    """從檔名解析 ISIN（支援 SWB、LUXSE、FINRA、FINRA_DLY 格式）"""
     import re
-    isin_match = re.search(r'([A-Z]{2}[A-Z0-9]{10})', name)
-    isin = isin_match.group(1) if isin_match else ""
-    return isin
+
+    # FINRA 格式對照表（ticker → ISIN）
+    FINRA_DB = {
+        "FINRA_DLY_APO5813716":    "US03769MAC01",  # 阿波羅全球
+        "FINRA_DLY_BIIB4981508":   "US09062XAG88",  # 生物基因
+        "FINRA_DLY_BRK3963113":    "US084670BK32",  # 波克夏
+        "FINRA_DLY_BUD4327587":    "US035242AM81",  # 百威英博
+        "FINRA_DLY_CI4866401":     "US125523AK66",  # 信諾
+        "FINRA_DLY_CI5003121":     "US125523CF53",  # 信諾
+        "FINRA_DLY_CMCS4382861":   "US20030NBU46",  # 康卡斯特
+        "FINRA_DLY_FBUO6172956":   "US31428XCA28",  # 聯邦快遞
+        "FINRA_DLY_GILD4287890":   "US375558BD48",  # 吉利德2（4.75%）
+        "FINRA_DLY_GILD4287891":   "US375558BD48",  # 吉利德2
+        "FINRA_DLY_GM4181484":     "US37045VAT70",  # 通用汽車
+        "FINRA_DLY_HBC US404280AG49": "US404280AG49", # 匯豐
+        "FINRA_DLY_IBM5449458":    "US449276AF17",  # IBM
+        "FINRA_DLY_ICE5414190":    "US45866FAX24",  # 洲際交易所
+        "FINRA_DLY_KO4969567":     "US191216CQ13",  # 可口可樂
+        "FINRA_DLY_MO4065695":     "US02209SAR40",  # 高特利集團
+        "FINRA_DLY_MO4403915":     "US02209SAV51",  # 高特利集團2
+        "FINRA_DLY_MS4204532":     "US61747YDY86",  # 摩根士丹利
+        "FINRA_DLY_NFLX5862368":   "US64110LBA35",  # 網飛
+        "FINRA_DLY_QCOM4246685":   "US747525AK99",  # 高通
+        "FINRA_DLY_SCBFF4110430":  "XS1049699926",  # 渣打
+        "FINRA_DLY_SDBO4820048":   "US854502AJ02",  # 史丹利百得
+        "FINRA_DLY_SWK.GM":        "US854502AA92",  # 史丹利百得2
+        "FINRA_DLY_T4237450":      "US00206RCQ39",  # AT&T
+        "FINRA_DLY_T4451561":      "US00206RCU41",  # AT&T
+        "FINRA_DLY_USB5600582":    "US91159HJN17",  # 美國合眾銀
+        "FINRA_DLY_VIA4987234":    "US92556HAC16",  # 維康
+        "FINRA_DLY_VZ4968008":     "US92343VGW81",  # 威瑞森
+        "FINRA_DLY_VZ5363445":     "US92343VFD10",  # 威瑞森2
+    }
+
+    # 先查 FINRA 對照表
+    for key, isin in FINRA_DB.items():
+        if key.lower() in name.lower():
+            return isin
+
+    # 再從檔名抓 ISIN（支援 US 和 XS 開頭，12碼）
+    isin_match = re.search(r'\b([A-Z]{2}[A-Z0-9]{10})\b', name)
+    if isin_match:
+        return isin_match.group(1)
+
+    return ""
 
 LOCAL_DB = {
     "US02079KBP12": {"issuer": "Alphabet 公司債6", "coupon": 5.65, "maturity": "2056"},
@@ -660,4 +702,4 @@ else:
 
 st.markdown("---")
 st.warning("⚠️ **免責聲明**：本工具所顯示之價格資料來源為 TradingView，僅供參考，並非本行實際報價。實際申購價格以本行公告為準，投資人應自行評估風險。")
-st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 僅供參考，不構成投資建議")
+st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 此價格僅為 TradingView 中間價，並非銀行報價 ｜ 僅供參考，不構成投資建議")
