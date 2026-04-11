@@ -326,18 +326,32 @@ try:
         st.warning("⚠️ bond-data 資料夾中沒有試算表，請先上傳 CSV 並確認已轉換為 Google 試算表格式。")
         st.stop()
     
-    # 建立選單選項
+    # 建立選單選項：顯示「債券名稱（ISIN）」格式
     file_options = {f["name"]: f["id"] for f in files}
     file_names = list(file_options.keys())
 
-    # 預載所有 ISIN 資訊（批次查詢，一次搞定）
+    # 預載所有 ISIN 資訊
     all_isins = [parse_filename(name) for name in file_names]
-    all_isins = [isin for isin in all_isins if isin]
-    if all_isins:
-        with st.spinner(f"正在查詢 {len(all_isins)} 檔債券基本資料..."):
-            bond_info_cache = batch_lookup_bond_info(tuple(all_isins))
+    all_isins_clean = [isin for isin in all_isins if isin]
+    if all_isins_clean:
+        bond_info_cache = batch_lookup_bond_info(tuple(all_isins_clean))
     else:
         bond_info_cache = {}
+
+    # 建立「顯示名稱 → 原始檔名」對照
+    def make_display_name(file_name):
+        isin = parse_filename(file_name)
+        if isin and isin in bond_info_cache:
+            info = bond_info_cache[isin]
+            issuer = info["issuer"]
+            coupon = info["coupon"]
+            maturity = info["maturity"]
+            if issuer and issuer != isin:
+                return f"{issuer}（{isin}）"
+        return file_name
+
+    display_to_file = {make_display_name(f): f for f in file_names}
+    display_names = list(display_to_file.keys())
 
 except Exception as e:
     st.error(f"❌ 無法連接 Google Drive：{e}")
@@ -356,14 +370,15 @@ for i in range(n):
         label = LABELS[i]
         st.markdown(f'<span class="bond-tag" style="background:{color}">債券 {label}</span>', unsafe_allow_html=True)
         
-        selected = st.selectbox(
+        selected_display = st.selectbox(
             f"選擇債券",
-            options=["（請選擇）"] + file_names,
+            options=["（請選擇）"] + display_names,
             key=f"sel_{i}"
         )
+        selected = display_to_file.get(selected_display, "") if selected_display != "（請選擇）" else ""
 
         # 從預載快取取債券資訊
-        if selected != "（請選擇）":
+        if selected:
             isin = parse_filename(selected)
             if isin and isin in bond_info_cache:
                 info = bond_info_cache[isin]
@@ -372,27 +387,27 @@ for i in range(n):
                 maturity = info["maturity"]
                 default_name = f"{issuer} {auto_coupon}% {maturity}".strip() if issuer != isin else selected
                 default_coupon = auto_coupon
-                if st.session_state.get(f"last_sel_{i}") != selected:
+                if st.session_state.get(f"last_sel_{i}") != selected_display:
                     st.session_state[f"name_{i}"] = default_name
                     st.session_state[f"coupon_{i}"] = default_coupon
-                    st.session_state[f"last_sel_{i}"] = selected
+                    st.session_state[f"last_sel_{i}"] = selected_display
                 if auto_coupon > 0:
-                    st.success(f"✅ {isin}｜{issuer}｜票息 {auto_coupon}%｜到期 {maturity}")
+                    st.success(f"✅ {isin}｜票息 {auto_coupon}%｜到期 {maturity}")
             else:
-                if st.session_state.get(f"last_sel_{i}") != selected:
+                if st.session_state.get(f"last_sel_{i}") != selected_display:
                     st.session_state[f"name_{i}"] = selected
                     st.session_state[f"coupon_{i}"] = 0.0
-                    st.session_state[f"last_sel_{i}"] = selected
+                    st.session_state[f"last_sel_{i}"] = selected_display
         else:
-            if st.session_state.get(f"last_sel_{i}") != selected:
+            if st.session_state.get(f"last_sel_{i}") != selected_display:
                 st.session_state[f"name_{i}"] = ""
                 st.session_state[f"coupon_{i}"] = 0.0
-                st.session_state[f"last_sel_{i}"] = selected
+                st.session_state[f"last_sel_{i}"] = selected_display
 
         name = st.text_input("債券名稱（可修改）", placeholder="例：Apple 3% 2027", key=f"name_{i}")
         coupon = st.number_input("票息率 % （可修改）", step=0.01, min_value=0.0, max_value=20.0, key=f"coupon_{i}")
         
-        sheet_id = file_options.get(selected) if selected != "（請選擇）" else None
+        sheet_id = file_options.get(selected) if selected else None
         bonds.append({
             "sheet_id": sheet_id,
             "name": name or f"債券{label}",
@@ -644,4 +659,5 @@ else:
     """)
 
 st.markdown("---")
+st.warning("⚠️ **免責聲明**：本工具所顯示之價格資料來源為 TradingView，僅供參考，並非本行實際報價。實際申購價格以本行公告為準，投資人應自行評估風險。")
 st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 僅供參考，不構成投資建議")
