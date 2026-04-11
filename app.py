@@ -703,4 +703,4 @@ else:
 
 st.markdown("---")
 st.warning("⚠️ **免責聲明**：本工具所顯示之價格資料來源為 TradingView，僅供參考，並非本行實際報價。實際申購價格以本行公告為準，投資人應自行評估風險。")
-st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 此價格僅為 TradingView 中間價，並非銀行報價 ｜ 僅供參考，不構成投資建議")
+st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 此價格僅為 TradingView 收盤價，並非銀行報價 ｜ 僅供參考，不構成投資建議")
