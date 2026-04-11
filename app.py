@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 from datetime import timedelta
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="債券績效比較", layout="wide", page_icon="📊")
 
-# 每檔對應顏色
 COLORS = ["#1565c0", "#c62828", "#2e7d32", "#6a1b9a", "#e65100", "#00838f"]
 LABELS = ["A", "B", "C", "D", "E", "F"]
 
@@ -66,7 +67,7 @@ st.markdown("""
 
 .bond-tag {
     display: inline-block;
-    padding: 2px 8px;
+    padding: 2px 10px;
     border-radius: 20px;
     font-size: 0.78rem;
     font-weight: 700;
@@ -79,6 +80,28 @@ st.markdown("""
 }
 .legend-item { display: flex; align-items: center; gap: 6px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display:inline-block; }
+
+.annual-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.84rem;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.annual-table th {
+    background: #1a2744;
+    color: white;
+    padding: 8px 12px;
+    text-align: center;
+}
+.annual-table th.left { text-align: left; }
+.annual-table td {
+    padding: 7px 12px;
+    text-align: center;
+    border-bottom: 1px solid #f0f0f0;
+}
+.annual-table td.year-col { text-align: left; font-weight: 700; color: #1a2744; }
+.annual-table tr:last-child td { border-bottom: none; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -104,6 +127,22 @@ def calc_period(df, coupon_rate, days):
     coupon_ret = (coupon_rate / 100) * (actual_days / 365)
     return {"price": price_ret, "coupon": coupon_ret, "total": price_ret + coupon_ret}
 
+def calc_annual(df, coupon_rate):
+    df = df.copy()
+    df["year"] = df["date"].dt.year
+    rows = []
+    for year in sorted(df["year"].unique()):
+        ydf = df[df["year"] == year]
+        if len(ydf) < 2:
+            continue
+        sp, ep = ydf["close"].iloc[0], ydf["close"].iloc[-1]
+        days = (ydf["date"].iloc[-1] - ydf["date"].iloc[0]).days
+        price_ret = (ep - sp) / sp
+        coupon_ret = (coupon_rate / 100) * (days / 365) if days > 0 else 0
+        rows.append({"year": str(year), "price": price_ret,
+                     "coupon": coupon_ret, "total": price_ret + coupon_ret})
+    return rows
+
 def fmt(val, bold=False):
     if val is None:
         return '<span class="neu">—</span>'
@@ -111,20 +150,26 @@ def fmt(val, bold=False):
     text = f"{val:+.2%}"
     return f'<span class="{css}"><b>{text}</b></span>' if bold else f'<span class="{css}">{text}</span>'
 
+def color_cell(val):
+    if val is None:
+        return ""
+    if val > 0.0005:
+        return "color:#2e7d32;font-weight:600;"
+    elif val < -0.0005:
+        return "color:#c62828;font-weight:600;"
+    return "color:#888;"
+
 
 # ==========================================
-# 主介面
+# 介面
 # ==========================================
 st.markdown("## 📊 債券績效比較工具")
 st.markdown("上傳 TradingView 匯出的 CSV，自動計算並比較各期間總報酬")
 st.markdown("---")
 
-# 選檔數
 n = st.radio("比較幾檔債券？", [2, 3, 4, 5, 6], horizontal=True)
-
 st.markdown("---")
 
-# 動態產生上傳欄位
 bonds = []
 cols = st.columns(n)
 for i in range(n):
@@ -139,59 +184,40 @@ for i in range(n):
 
 st.markdown("---")
 
-# ==========================================
-# 計算與顯示
-# ==========================================
 loaded = [(b, load_csv(b["file"])) for b in bonds if b["file"] is not None]
 
 if loaded:
     periods = [("1個月",30),("3個月",90),("6個月",180),
                ("1年",365),("2年",730),("3年",1095),("5年",1825)]
 
-    # 資料期間顯示
+    # 資料期間
     info_cols = st.columns(len(loaded))
     for idx, (b, df) in enumerate(loaded):
         with info_cols[idx]:
             st.markdown(f'<span class="bond-tag" style="background:{b["color"]}">{b["label"]}</span> **{b["name"]}**', unsafe_allow_html=True)
             st.caption(f"{df['date'].min().strftime('%Y-%m-%d')} ～ {df['date'].max().strftime('%Y-%m-%d')}（{len(df)} 筆）")
 
-    st.markdown("")
-
-    # 計算所有期間數據
-    all_data = []
-    for b, df in loaded:
-        period_data = {label: calc_period(df, b["coupon"], days) for label, days in periods}
-        all_data.append((b, period_data))
+    all_data = [(b, {label: calc_period(df, b["coupon"], days) for label, days in periods}) for b, df in loaded]
 
     # ==========================================
-    # 建立 HTML 表格
+    # 一、各期間績效比較表
     # ==========================================
+    st.subheader("🏆 各期間績效比較")
 
-    # 表頭第一行：期間 + 每檔標題（含分隔）
-    html = '<table class="compare-table"><thead>'
-    html += '<tr><th class="period-col" rowspan="2">期間</th>'
+    html = '<table class="compare-table"><thead><tr>'
+    html += '<th class="period-col" rowspan="2">期間</th>'
     for idx, (b, _) in enumerate(all_data):
         if idx > 0:
             html += '<th class="divider" rowspan="2"></th>'
-        short_name = b["name"][:14] + ("…" if len(b["name"]) > 14 else "")
-        html += f'<th colspan="3" style="background:{b["color"]};color:white;">{b["label"]}. {short_name}</th>'
-    html += "</tr>"
-
-    # 表頭第二行：價格漲跌 / 票息收益 / 總報酬
-    html += "<tr>"
-    for idx, (b, _) in enumerate(all_data):
-        if idx > 0:
-            html += ""  # rowspan 已處理
-        html += f'<th class="sub-header">價格漲跌</th>'
-        html += f'<th class="sub-header">票息收益</th>'
-        html += f'<th class="hl">總報酬 ★</th>'
+        short = b["name"][:14] + ("…" if len(b["name"]) > 14 else "")
+        html += f'<th colspan="3" style="background:{b["color"]};color:white;">{b["label"]}. {short}</th>'
+    html += "</tr><tr>"
+    for idx in range(len(all_data)):
+        html += '<th class="sub-header">價格漲跌</th><th class="sub-header">票息收益</th><th class="hl">總報酬 ★</th>'
     html += "</tr></thead><tbody>"
 
-    # 表身
     for period_label, _ in periods:
         html += f'<tr><td class="period-col">{period_label}</td>'
-
-        row_totals = []
         for idx, (b, period_data) in enumerate(all_data):
             if idx > 0:
                 html += '<td class="divider"></td>'
@@ -199,60 +225,122 @@ if loaded:
             html += f'<td>{fmt(r["price"]) if r else "—"}</td>'
             html += f'<td>{fmt(r["coupon"]) if r else "—"}</td>'
             html += f'<td class="hl">{fmt(r["total"], bold=True) if r else "—"}</td>'
-            row_totals.append(r["total"] if r else None)
-
         html += "</tr>"
 
-    # 統計列（勝出次數）
-    if len(all_data) > 1:
-        # 計算每期勝者
-        wins = [0] * len(all_data)
-        for period_label, _ in periods:
-            totals = []
-            for idx, (b, period_data) in enumerate(all_data):
-                r = period_data.get(period_label)
-                totals.append(r["total"] if r else None)
-            
-            valid = [(i, t) for i, t in enumerate(totals) if t is not None]
-            if valid:
-                best_val = max(t for _, t in valid)
-                for i, t in valid:
-                    if t >= best_val - 0.0001:
-                        wins[i] += 1
+    # 勝出統計
+    wins = [0] * len(all_data)
+    for period_label, _ in periods:
+        totals = [all_data[i][1].get(period_label) for i in range(len(all_data))]
+        valid = [(i, r["total"]) for i, r in enumerate(totals) if r]
+        if valid:
+            best = max(t for _, t in valid)
+            for i, t in valid:
+                if t >= best - 0.0001:
+                    wins[i] += 1
 
-        html += '<tr style="background:#1a2744;">'
-        html += '<td class="period-col" style="background:#1a2744;color:#ffd700;font-weight:700;">🏆 勝出</td>'
-        for idx, (b, _) in enumerate(all_data):
-            if idx > 0:
-                html += '<td class="divider" style="background:#0d1b33;"></td>'
-            html += f'<td colspan="2" style="text-align:center;color:#ccc;font-size:0.82rem;">{b["label"]}. {b["name"][:10]}</td>'
-            html += f'<td style="text-align:center;color:#ffd700;font-weight:700;">{wins[idx]} 期間</td>'
-        html += "</tr>"
+    html += '<tr style="background:#1a2744;"><td class="period-col" style="background:#1a2744;color:#ffd700;font-weight:700;">🏆 勝出</td>'
+    for idx, (b, _) in enumerate(all_data):
+        if idx > 0:
+            html += '<td class="divider" style="background:#0d1b33;"></td>'
+        html += f'<td colspan="2" style="text-align:center;color:#ccc;font-size:0.8rem;">{b["label"]}. {b["name"][:8]}</td>'
+        html += f'<td style="text-align:center;color:#ffd700;font-weight:700;">{wins[idx]} 期間</td>'
+    html += "</tr>"
 
-        # 整體勝者
-        max_wins = max(wins)
-        winners = [all_data[i][0] for i, w in enumerate(wins) if w == max_wins]
-        if len(winners) == 1:
-            w = winners[0]
-            overall_text = f'🏆 整體較佳：{w["label"]}. {w["name"]}'
-            overall_color = w["color"]
-        else:
-            overall_text = "🤝 勢均力敵：" + "、".join(f'{w["label"]}.{w["name"][:6]}' for w in winners)
-            overall_color = "#888"
+    max_wins = max(wins)
+    winners = [all_data[i][0] for i, w in enumerate(wins) if w == max_wins]
+    if len(winners) == 1:
+        w = winners[0]
+        overall = f'🏆 整體較佳：{w["label"]}. {w["name"]}'
+        oc = w["color"]
+    else:
+        overall = "🤝 勢均力敵：" + "、".join(f'{w["label"]}.{w["name"][:6]}' for w in winners)
+        oc = "#888"
 
-        total_cols = len(all_data) * 3 + (len(all_data) - 1)
-        html += f'<tr><td colspan="{total_cols + 1}" style="text-align:center;background:{overall_color}15;color:{overall_color};font-weight:700;padding:14px;font-size:0.95rem;">{overall_text}</td></tr>'
-
+    total_cols = len(all_data) * 3 + (len(all_data) - 1) + 1
+    html += f'<tr><td colspan="{total_cols}" style="text-align:center;background:{oc}18;color:{oc};font-weight:700;padding:14px;font-size:0.95rem;">{overall}</td></tr>'
     html += "</tbody></table>"
     st.markdown(html, unsafe_allow_html=True)
 
-    # 圖例
-    legend_html = '<div class="legend">'
-    legend_html += '<div class="legend-item"><span class="dot" style="background:#c8a84b;"></span>★ 總報酬 = 價格漲跌 + 票息（依實際持有天數）</div>'
-    legend_html += '<div class="legend-item"><span class="dot" style="background:#2e7d32;"></span>綠色 = 正報酬</div>'
-    legend_html += '<div class="legend-item"><span class="dot" style="background:#c62828;"></span>紅色 = 負報酬</div>'
-    legend_html += '</div>'
-    st.markdown(legend_html, unsafe_allow_html=True)
+    st.markdown("""
+    <div class="legend">
+        <div class="legend-item"><span class="dot" style="background:#c8a84b;"></span>★ 總報酬 = 價格漲跌 + 票息（依實際持有天數）</div>
+        <div class="legend-item"><span class="dot" style="background:#2e7d32;"></span>綠色 = 正報酬</div>
+        <div class="legend-item"><span class="dot" style="background:#c62828;"></span>紅色 = 負報酬</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ==========================================
+    # 二、走勢圖
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📈 價格走勢圖")
+
+    tab1, tab2, tab3 = st.tabs(["📊 標準化走勢（起始=100）", "💰 實際價格", "📉 回撤圖"])
+
+    with tab1:
+        fig = go.Figure()
+        for b, df in loaded:
+            norm = df["close"] / df["close"].iloc[0] * 100
+            fig.add_trace(go.Scatter(x=df["date"], y=norm, name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)))
+        fig.update_layout(yaxis_title="相對價格（起始=100）", hovermode="x unified", height=420,
+                          legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(fig, use_container_width=True)
+
+    with tab2:
+        fig2 = go.Figure()
+        for b, df in loaded:
+            fig2.add_trace(go.Scatter(x=df["date"], y=df["close"], name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)))
+        fig2.update_layout(yaxis_title="價格（面值100）", hovermode="x unified", height=420,
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(fig2, use_container_width=True)
+
+    with tab3:
+        fig3 = go.Figure()
+        for b, df in loaded:
+            p = df["close"]
+            dd = (p - p.cummax()) / p.cummax() * 100
+            r, g, bl = int(b["color"][1:3],16), int(b["color"][3:5],16), int(b["color"][5:7],16)
+            fig3.add_trace(go.Scatter(x=df["date"], y=dd, name=f'{b["label"]}. {b["name"]}',
+                fill="tozeroy", line=dict(color=b["color"], width=1.5),
+                fillcolor=f"rgba({r},{g},{bl},0.15)"))
+        fig3.update_layout(yaxis_title="回撤幅度 (%)", hovermode="x unified", height=420,
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(fig3, use_container_width=True)
+
+    # ==========================================
+    # 三、年度報酬表
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📅 年度報酬回顧")
+
+    # 收集所有年份
+    all_annual = [(b, calc_annual(df, b["coupon"])) for b, df in loaded]
+    all_years = sorted(set(r["year"] for _, rows in all_annual for r in rows), reverse=True)
+
+    ann_html = '<table class="annual-table"><thead><tr><th class="left">年度</th>'
+    for b, _ in all_annual:
+        short = b["name"][:12] + ("…" if len(b["name"]) > 12 else "")
+        ann_html += f'<th style="background:{b["color"]};">{b["label"]}. {short}<br><small style="font-weight:400;opacity:.85">價格漲跌</small></th>'
+        ann_html += f'<th style="background:{b["color"]};">票息收益</th>'
+        ann_html += f'<th style="background:{b["color"]};">總報酬 ★</th>'
+    ann_html += "</tr></thead><tbody>"
+
+    for year in all_years:
+        ann_html += f'<tr><td class="year-col">{year}</td>'
+        for b, rows in all_annual:
+            row = next((r for r in rows if r["year"] == year), None)
+            if row:
+                ann_html += f'<td style="{color_cell(row["price"])}">{row["price"]:+.2%}</td>'
+                ann_html += f'<td style="color:#2e7d32;">{row["coupon"]:+.2%}</td>'
+                ann_html += f'<td style="{color_cell(row["total"])};font-weight:700;">{row["total"]:+.2%}</td>'
+            else:
+                ann_html += '<td colspan="3" style="color:#ccc;">無資料</td>'
+        ann_html += "</tr>"
+
+    ann_html += "</tbody></table>"
+    st.markdown(ann_html, unsafe_allow_html=True)
 
 else:
     st.info("👆 請至少上傳一檔債券的 CSV 開始分析")
@@ -266,4 +354,4 @@ else:
     """)
 
 st.markdown("---")
-st.caption("資料來源：TradingView ｜ 僅供參考，不構成投資建議")
+st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 僅供參考，不構成投資建議")
