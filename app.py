@@ -285,24 +285,32 @@ for i in range(n):
         if selected != "（請選擇）":
             isin = parse_filename(selected)
             if isin:
-                with st.spinner(f"查詢 {isin} 基本資料..."):
-                    info = lookup_bond_info(isin)
+                info = lookup_bond_info(isin)
                 issuer = info["issuer"]
                 auto_coupon = info["coupon"]
                 maturity = info["maturity"]
                 default_name = f"{issuer} {auto_coupon}% {maturity}".strip() if issuer else selected
                 default_coupon = auto_coupon
+                # 強制更新 session_state，讓欄位值跟著變
+                if st.session_state.get(f"last_sel_{i}") != selected:
+                    st.session_state[f"name_{i}"] = default_name
+                    st.session_state[f"coupon_{i}"] = default_coupon
+                    st.session_state[f"last_sel_{i}"] = selected
                 if auto_coupon > 0:
                     st.success(f"✅ {isin}｜{issuer}｜票息 {auto_coupon}%｜到期 {maturity}")
             else:
-                default_name = selected
-                default_coupon = 0.0
+                if st.session_state.get(f"last_sel_{i}") != selected:
+                    st.session_state[f"name_{i}"] = selected
+                    st.session_state[f"coupon_{i}"] = 0.0
+                    st.session_state[f"last_sel_{i}"] = selected
         else:
-            default_name = ""
-            default_coupon = 0.0
+            if st.session_state.get(f"last_sel_{i}") != selected:
+                st.session_state[f"name_{i}"] = ""
+                st.session_state[f"coupon_{i}"] = 0.0
+                st.session_state[f"last_sel_{i}"] = selected
 
-        name = st.text_input("債券名稱（可修改）", value=default_name, placeholder="例：Apple 3% 2027", key=f"name_{i}")
-        coupon = st.number_input("票息率 % （可修改）", value=default_coupon, step=0.01, min_value=0.0, max_value=20.0, key=f"coupon_{i}")
+        name = st.text_input("債券名稱（可修改）", placeholder="例：Apple 3% 2027", key=f"name_{i}")
+        coupon = st.number_input("票息率 % （可修改）", step=0.01, min_value=0.0, max_value=20.0, key=f"coupon_{i}")
         
         sheet_id = file_options.get(selected) if selected != "（請選擇）" else None
         bonds.append({
