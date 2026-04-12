@@ -925,6 +925,10 @@ with main_tab1:
         if "chart_end" not in st.session_state:
             st.session_state["chart_end"] = all_max_date
 
+        # 每次都確保日期在合法範圍內（換標的後範圍可能改變）
+        st.session_state["chart_start"] = max(min(st.session_state["chart_start"], all_max_date), all_min_date)
+        st.session_state["chart_end"] = max(min(st.session_state["chart_end"], all_max_date), all_min_date)
+
         # 快速選擇按鈕
         st.markdown("**快速選擇區間：**")
         qcol1, qcol2, qcol3, qcol4, qcol5 = st.columns(5)
