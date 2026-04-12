@@ -407,7 +407,7 @@ def get_chinese_font():
 
     return "Helvetica"  # 備用英文字體
 
-def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, all_years, chart_start, chart_end, lang="zh", style="fubon"):
+def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, all_years, chart_start, chart_end, lang="zh", style="fubon", max_years=5):
     """生成債券績效比較 PDF 報告"""
     import io, os, tempfile
     from datetime import date
@@ -610,6 +610,20 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import matplotlib.ticker as mticker
+        from matplotlib import font_manager
+
+        # 設定中文字體
+        font_path = None
+        for p in ["/tmp/wqy_microhei.ttc",
+                  "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+                  "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"]:
+            if os.path.exists(p):
+                font_path = p
+                break
+        if font_path:
+            font_manager.fontManager.addfont(font_path)
+            fp = font_manager.FontProperties(fname=font_path)
+            matplotlib.rcParams["font.family"] = fp.get_name()
 
         fig, ax = plt.subplots(figsize=(10, 4.5))
         fig.patch.set_facecolor("#f8f9ff" if style != "simple" else "#f5f5f5")
@@ -618,14 +632,17 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
         for idx, (b, df) in enumerate(loaded_filtered):
             if df.empty: continue
             tri = total_return_index(df, b["coupon"])
-            ax.plot(df["date"], tri,
-                    label=f'{b["label"]}. {b["name"]}',
-                    color=bond_colors_hex[idx % len(bond_colors_hex)],
-                    linewidth=2)
+            lbl = f'{b["label"]}. {b["name"]}' if font_path else f'{b["label"]} ({b["coupon"]}%)'
+            ax.plot(df["date"], tri, label=lbl,
+                    color=bond_colors_hex[idx % len(bond_colors_hex)], linewidth=2)
 
-        ax.set_ylabel(L["y_axis"], fontsize=9)
+        fp_arg = font_manager.FontProperties(fname=font_path) if font_path else None
+        ax.set_ylabel(L["y_axis"], fontsize=9, fontproperties=fp_arg)
         ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%.1f'))
-        ax.legend(loc="upper left", fontsize=8, framealpha=0.8)
+        legend = ax.legend(loc="upper left", fontsize=8, framealpha=0.8)
+        if font_path and legend:
+            for text in legend.get_texts():
+                text.set_fontproperties(fp_arg)
         ax.grid(True, alpha=0.3, linestyle="--")
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -646,12 +663,15 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     story.append(Paragraph(L["s4"], h2_style))
     story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
 
+    # 只顯示最近 max_years 年，且過濾掉全部無資料的年度
+    filtered_years = all_years[:max_years]  # all_years 已按降序排列
+
     ann_header = [L["col_year"]]
     for b, _ in all_annual:
         ann_header += [f"{b['label']}. {L['col_price']}", L["col_coupon2"], L["col_total"]]
     ann_data = [ann_header]
 
-    for year in all_years:
+    for year in filtered_years:
         row = [year]
         for b, rows in all_annual:
             r = next((x for x in rows if x["year"] == year), None)
@@ -1035,6 +1055,8 @@ if loaded:
     )
     style_code = "fubon" if "富邦" in report_style else ("simple" if "簡約" in report_style else "colorful")
 
+    max_years = st.slider("年度報酬顯示幾年", min_value=1, max_value=10, value=5, step=1)
+
     if st.button("🖨️ 生成 PDF 報告", type="primary", use_container_width=True):
         with st.spinner("正在生成報告，請稍候..."):
             try:
@@ -1048,7 +1070,8 @@ if loaded:
                     chart_start=str(chart_start),
                     chart_end=str(chart_end),
                     lang=lang_code,
-                    style=style_code
+                    style=style_code,
+                    max_years=max_years
                 )
                 report_date = date.today().strftime("%Y%m%d")
                 bond_names = "_".join([b["label"] for b, _ in loaded])
