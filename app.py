@@ -358,7 +358,43 @@ def color_cell(val):
     elif val < -0.0005: return "color:#c62828;font-weight:600;"
     return "color:#888;"
 
-def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, all_years, chart_start, chart_end):
+def get_chinese_font():
+    """取得中文字體，優先用系統字體，否則下載"""
+    import os, tempfile, requests as req
+
+    font_name = "ChineseFont"
+
+    # 先試系統字體
+    system_paths = [
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKtc-Regular.otf",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    ]
+    for path in system_paths:
+        if os.path.exists(path):
+            try:
+                pdfmetrics.registerFont(TTFont(font_name, path))
+                return font_name
+            except:
+                continue
+
+    # 下載 WQY Microhei（輕量中文字體）
+    try:
+        cache_path = "/tmp/wqy_microhei.ttc"
+        if not os.path.exists(cache_path):
+            url = "https://github.com/anthonyfok/fonts-wqy-microhei/raw/master/wqy-microhei.ttc"
+            r = req.get(url, timeout=30)
+            with open(cache_path, "wb") as f:
+                f.write(r.content)
+        pdfmetrics.registerFont(TTFont(font_name, cache_path))
+        return font_name
+    except:
+        pass
+
+    return "Helvetica"  # 備用英文字體
+
+def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, all_years, chart_start, chart_end, lang="zh"):
     """生成債券績效比較 PDF 報告"""
     import io, os, tempfile
     from datetime import date
@@ -370,20 +406,42 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
         topMargin=2*cm, bottomMargin=2*cm
     )
 
-    # 嘗試載入中文字體
-    font_name = "Helvetica"
-    try:
-        import requests as req
-        font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
-        # 使用系統可能有的字體
-        for path in ["/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-                     "/System/Library/Fonts/PingFang.ttc"]:
-            if os.path.exists(path):
-                pdfmetrics.registerFont(TTFont("Chinese", path))
-                font_name = "Chinese"
-                break
-    except:
-        pass
+    # 語言文字對照
+    if lang == "en":
+        L = {
+            "title": "Bond Performance Comparison Report",
+            "period": f"Period: {chart_start} ~ {chart_end}  |  Date: {date.today().strftime('%Y-%m-%d')}",
+            "s1": "1. Bond Basic Information",
+            "s2": "2. Period Performance Comparison",
+            "s3": "3. Total Return Index (with coupon)",
+            "s4": "4. Annual Return Review",
+            "col_name": "Bond Name", "col_isin": "ISIN", "col_issuer": "Issuer",
+            "col_coupon": "Coupon", "col_mat": "Maturity",
+            "col_period": "Period", "col_price": "Price", "col_coupon2": "Coupon",
+            "col_total": "Total★", "col_year": "Year",
+            "disclaimer": "⚠️ Disclaimer: Price data sourced from TradingView for reference only. Not actual bank pricing. Total Return = Price Change + Coupon (estimated by holding days).",
+            "no_data": "No Data",
+            "y_axis": "Total Return Index (Base=100, with coupon)",
+        }
+    else:
+        L = {
+            "title": "債券績效比較報告",
+            "period": f"比較區間：{chart_start} ～ {chart_end}　｜　製作日期：{date.today().strftime('%Y-%m-%d')}",
+            "s1": "一、債券基本資訊",
+            "s2": "二、各期間績效比較",
+            "s3": "三、價格走勢圖（標準化，含息）",
+            "s4": "四、年度報酬回顧",
+            "col_name": "債券名稱", "col_isin": "ISIN", "col_issuer": "發行機構",
+            "col_coupon": "票息率", "col_mat": "到期年",
+            "col_period": "期間", "col_price": "價格漲跌", "col_coupon2": "票息收益",
+            "col_total": "總報酬★", "col_year": "年度",
+            "disclaimer": "⚠️ 免責聲明：本報告價格資料來源為 TradingView，此價格僅為中間價，並非本行實際報價，僅供參考，不構成投資建議。總報酬 = 價格漲跌 + 票息（依實際持有天數估算）。",
+            "no_data": "無資料",
+            "y_axis": "總報酬指數（起始=100，含息）",
+        }
+
+    # 取得中文字體
+    font_name = get_chinese_font()
 
     # 顏色定義
     NAVY    = colors.HexColor("#1a2744")
@@ -417,8 +475,8 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     story = []
 
     # ── 封面標題區 ──────────────────────────────────
-    title_table = Table([[Paragraph("📊 債券績效比較報告", title_style)],
-                         [Paragraph(f"比較區間：{chart_start} ～ {chart_end}　｜　製作日期：{date.today().strftime('%Y-%m-%d')}", sub_style)]],
+    title_table = Table([[Paragraph(L["title"], title_style)],
+                         [Paragraph(L["period"], sub_style)]],
                         colWidths=[17*cm])
     title_table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,-1), NAVY),
@@ -430,16 +488,16 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     story.append(Spacer(1, 0.5*cm))
 
     # ── 一、債券基本資訊 ──────────────────────────────
-    story.append(Paragraph("一、債券基本資訊", h2_style))
+    story.append(Paragraph(L["s1"], h2_style))
     story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
 
-    info_data = [["", "債券名稱", "ISIN", "發行機構", "票息率", "到期年"]]
+    info_data = [["", L["col_name"], L["col_isin"], L["col_issuer"], L["col_coupon"], L["col_mat"]]]
     for idx, (b, df) in enumerate(loaded):
         isin = parse_filename(b["selected"])
         info = LOCAL_DB.get(isin, {})
-        issuer  = info.get("issuer", "—")
-        coupon  = f"{info.get('coupon', '—')}%" if info.get('coupon') else "—"
-        maturity = info.get("maturity", "—")
+        issuer  = info.get("issuer", "-")
+        coupon  = f"{info.get('coupon', '-')}%" if info.get('coupon') else "-"
+        maturity = info.get("maturity", "-")
         info_data.append([
             Paragraph(f"<font color='{bond_colors_hex[idx]}'>●</font> {b['label']}", body_style),
             b["name"], isin, issuer, coupon, maturity
@@ -462,18 +520,16 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     story.append(Spacer(1, 0.4*cm))
 
     # ── 二、各期間績效比較 ────────────────────────────
-    story.append(Paragraph("二、各期間績效比較", h2_style))
+    story.append(Paragraph(L["s2"], h2_style))
     story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
 
-    # 表頭
-    header = ["期間"]
+    header = [L["col_period"]]
     for b, _ in all_data:
-        short = b["name"][:8] + ("…" if len(b["name"]) > 8 else "")
-        header += [f"{b['label']}. 價格", "票息", "總報酬★"]
+        header += [f"{b['label']}. {L['col_price']}", L["col_coupon2"], L["col_total"]]
     perf_data = [header]
 
     def fmt_pct(val):
-        if val is None: return "—"
+        if val is None: return L["no_data"]
         return f"{val:+.2%}"
 
     for period_label, _ in periods:
@@ -499,7 +555,6 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
         ("TOPPADDING",   (0,0), (-1,-1), 5),
         ("BOTTOMPADDING",(0,0), (-1,-1), 5),
     ]
-    # 總報酬欄金色背景
     for col_idx in range(len(all_data)):
         total_col = 1 + col_idx * 3 + 2
         ts.append(("BACKGROUND", (total_col, 1), (total_col, -1), colors.HexColor("#fffde7")))
@@ -510,7 +565,7 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
 
     # ── 三、走勢圖 ────────────────────────────────────
     story.append(PageBreak())
-    story.append(Paragraph("三、價格走勢圖（標準化，含息）", h2_style))
+    story.append(Paragraph(L["s3"], h2_style))
     story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
 
     try:
@@ -524,7 +579,7 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
                 line=dict(color=bond_colors_hex[idx], width=2.5)
             ))
         fig_pdf.update_layout(
-            yaxis_title="總報酬指數（起始=100，含息）",
+            yaxis_title=L["y_axis"],
             hovermode="x unified", height=380, width=650,
             margin=dict(l=40, r=20, t=20, b=40),
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
@@ -535,18 +590,17 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
         rl_img = RLImage(img_buf, width=15*cm, height=8.5*cm)
         story.append(rl_img)
     except Exception as e:
-        story.append(Paragraph(f"⚠️ 走勢圖無法生成（請確認已安裝 kaleido）：{e}", small_style))
+        story.append(Paragraph(f"Chart unavailable (kaleido required): {e}", small_style))
 
     story.append(Spacer(1, 0.4*cm))
 
     # ── 四、年度報酬 ──────────────────────────────────
-    story.append(Paragraph("四、年度報酬回顧", h2_style))
+    story.append(Paragraph(L["s4"], h2_style))
     story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
 
-    ann_header = ["年度"]
+    ann_header = [L["col_year"]]
     for b, _ in all_annual:
-        short = b["name"][:8] + ("…" if len(b["name"]) > 8 else "")
-        ann_header += [f"{b['label']}. 價格", "票息", "總報酬"]
+        ann_header += [f"{b['label']}. {L['col_price']}", L["col_coupon2"], L["col_total"]]
     ann_data = [ann_header]
 
     for year in all_years:
@@ -565,12 +619,7 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
 
     # ── 五、免責聲明 ──────────────────────────────────
     story.append(HRFlowable(width="100%", thickness=1, color=GRAY, spaceBefore=8, spaceAfter=6))
-    disclaimer = (
-        "⚠️ 免責聲明：本報告所顯示之價格資料來源為 TradingView，此價格僅為中間價，並非本行實際報價，"
-        "僅供參考，不構成投資建議。實際申購價格以本行公告為準，投資人應自行評估風險。"
-        "總報酬 = 價格漲跌 + 票息（依實際持有天數估算）。"
-    )
-    story.append(Paragraph(disclaimer, warn_style))
+    story.append(Paragraph(L["disclaimer"], warn_style))
 
     doc.build(story)
     buf.seek(0)
@@ -924,6 +973,13 @@ if loaded:
     st.subheader("📄 生成比較報告")
     st.caption("點擊下方按鈕，生成包含債券基本資訊、績效比較、走勢圖、年度報酬的精美 PDF 報告")
 
+    report_lang = st.radio(
+        "報告語言版本",
+        ["中文版", "English"],
+        horizontal=True
+    )
+    lang_code = "zh" if report_lang == "中文版" else "en"
+
     if st.button("🖨️ 生成 PDF 報告", type="primary", use_container_width=True):
         with st.spinner("正在生成報告，請稍候..."):
             try:
@@ -935,11 +991,13 @@ if loaded:
                     all_annual=all_annual,
                     all_years=all_years,
                     chart_start=str(chart_start),
-                    chart_end=str(chart_end)
+                    chart_end=str(chart_end),
+                    lang=lang_code
                 )
                 report_date = date.today().strftime("%Y%m%d")
                 bond_names = "_".join([b["label"] for b, _ in loaded])
-                filename = f"債券績效比較_{bond_names}_{report_date}.pdf"
+                suffix = "ZH" if lang_code == "zh" else "EN"
+                filename = f"Bond_Report_{bond_names}_{report_date}_{suffix}.pdf"
                 st.download_button(
                     label="📥 下載 PDF 報告",
                     data=pdf_buf,
