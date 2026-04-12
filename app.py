@@ -1260,6 +1260,12 @@ with main_tab2:
 
             if selected_cf != "（請選擇）":
                 item = all_cf_options[selected_cf]
+
+                # 換了標的就自動更新收益率
+                if st.session_state.get(f"cf_last_sel_{i}") != selected_cf:
+                    st.session_state[f"cf_yield_{i}"] = round(item["annual_yield"] * 100, 2)
+                    st.session_state[f"cf_last_sel_{i}"] = selected_cf
+
                 default_pct = round(100.0 / n_cf, 1)
                 pct = st.number_input(
                     "投資比例 %",
@@ -1267,12 +1273,11 @@ with main_tab2:
                     value=default_pct, step=1.0,
                     key=f"cf_pct_{i}", format="%.1f"
                 )
-                # 顯示當期收益率（可修改）
-                default_yield = item["annual_yield"] * 100
+                # 顯示當期收益率（可修改），換標的時自動更新
                 yield_pct = st.number_input(
                     "當期年化收益率 %（可修改）",
                     min_value=0.0, max_value=30.0,
-                    value=round(default_yield, 2), step=0.01,
+                    step=0.01,
                     key=f"cf_yield_{i}", format="%.2f"
                 )
                 amt = principal * pct / 100
