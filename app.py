@@ -702,7 +702,7 @@ st.markdown("## 📊 債券投資工具")
 st.markdown("---")
 
 # 主分頁
-main_tab1, main_tab2 = st.tabs(["📈 績效回測比較", "💰 現金流試算"])
+main_tab1, main_tab2 = st.tabs(["📈 績效回測比較", "🎉 金開心試算"])
 
 with main_tab1:
     st.markdown("從 Google Drive `bond-data` 資料夾自動讀取，選擇債券後立即比較績效")
@@ -1135,7 +1135,41 @@ FUND_DB = {
     "ELN（月配12%）": {"name": "ELN", "annual_yield": 0.1200, "type": "ELN"},
 }
 
-# 債券配息月份推算（從到期月份）
+# 債券當期收益率對照表（票息/報價，每次更新Excel時更新）
+BOND_CURRENT_YIELD = {
+    "US88579YBD22": 0.0489, "US084664CQ25": 0.0484, "XS1807174559": 0.0520,
+    "US023135BJ40": 0.0476, "US375558BK80": 0.0483, "US037833CH12": 0.0472,
+    "US002824BH26": 0.0505, "XS1508675508": 0.0518, "US02209SAV51": 0.0498,
+    "US92343VCK89": 0.0520, "US594918BT09": 0.0442, "US125523CF53": 0.0522,
+    "US20030NBU46": 0.0469, "US375558BD48": 0.0508, "US02079KBN63": 0.0521,
+    "US30303M8X35": 0.0546, "US747525AK99": 0.0513, "US25468PDB94": 0.0468,
+    "US717081DK61": 0.0481, "US449276AF17": 0.0543, "US02209SAR40": 0.0550,
+    "US12572QAF28": 0.0513, "US037833AL42": 0.0442, "US084670BK32": 0.0460,
+    "US594918BZ68": 0.0412, "US717081EC37": 0.0415, "US035242AM81": 0.0465,
+    "US91159HJN17": 0.0543, "US55608KBG94": 0.0521, "US686330AR22": 0.0498,
+    "USG91139AL26": 0.0442, "US92556HAC16": 0.0741, "US31428XCA28": 0.0544,
+    "US09062XAG88": 0.0468, "US37045VAT70": 0.0595, "US854502AJ02": 0.0541,
+    "US00206RCU41": 0.0556, "US94974BGU89": 0.0534, "US172967KR13": 0.0531,
+    "US00206RCQ39": 0.0530, "US58013MFA71": 0.0517, "US42824CAY57": 0.0604,
+    "US09062XAD57": 0.0543, "US37045VAJ98": 0.0564, "US61747YDY86": 0.0492,
+    "US94974BGE48": 0.0525, "US172967HS33": 0.0546, "XS1049699926": 0.0559,
+    "US404280AQ21": 0.0530, "US37045VAF76": 0.0600, "US92553PAP71": 0.0638,
+    "US00206RBH49": 0.0492, "US71568QAB32": 0.0560, "US854502AA92": 0.0527,
+    "US50076QAN60": 0.0594, "XS2885079702": 0.0515, "US46625HHF01": 0.0557,
+    "US37045VAP58": 0.0524, "US126650CY46": 0.0495, "US38141GFD16": 0.0594,
+    "US00206RDR03": 0.0504, "US404280AG49": 0.0576, "US38143YAC75": 0.0582,
+    "US925524AX89": 0.0700, "US37045VAK61": 0.0598, "XS3151416727": 0.0533,
+    "US06051GLU12": 0.0545, "XS2852920342": 0.0556, "US458140CA64": 0.0423,
+    "US02079KBP12": 0.0565, "US30303MAE21": 0.0563, "US64110LBA35": 0.0540,
+    "US03769MAC01": 0.0580, "US191216DS69": 0.0530, "US92343VGW81": 0.0550,
+    "XS2747599509": 0.0575, "US29736RAU41": 0.0515, "US037833EW60": 0.0485,
+    "US91324PEW86": 0.0505, "US532457CG18": 0.0488, "US91324PES74": 0.0588,
+    "US459200KZ37": 0.0510, "US459200KV23": 0.0490, "US45866FAX24": 0.0495,
+    "US872898AJ06": 0.0450, "US084664DB47": 0.0385, "US92343VGP31": 0.0388,
+    "US828807DJ39": 0.0380, "US191216CQ13": 0.0420, "US254687FM36": 0.0275,
+    "XS1982116136": 0.0438, "US58933YAW57": 0.0400,
+    "US125523AK66": 0.0490, "US084664CQ25": 0.0484,
+}
 def get_bond_pay_months(isin):
     info = LOCAL_DB.get(isin, {})
     maturity_year = info.get("maturity", "")
@@ -1196,7 +1230,13 @@ with main_tab2:
     st.markdown("---")
 
     # 建立所有可選標的
-    bond_options = {f"{v['issuer']}（{k}）": {"isin": k, "type": "BOND", "name": v["issuer"], "annual_yield": v["coupon"]/100} for k, v in LOCAL_DB.items()}
+    bond_options = {
+        f"{v['issuer']}（{k}）": {
+            "isin": k, "type": "BOND", "name": v["issuer"],
+            "annual_yield": BOND_CURRENT_YIELD.get(k, v["coupon"]/100)
+        }
+        for k, v in LOCAL_DB.items()
+    }
     fund_options = {f"【基金/ELN】{v['name']}": {"isin": k, "type": v["type"], "name": v["name"], "annual_yield": v["annual_yield"]} for k, v in FUND_DB.items()}
     all_cf_options = dict(sorted({**bond_options, **fund_options}.items()))
     all_cf_keys = ["（請選擇）"] + list(all_cf_options.keys())
@@ -1263,24 +1303,7 @@ with main_tab2:
         total_income = sum(x["annual_income"] for x in cf_items)
         avg_yield = total_income / principal * 100 if principal > 0 else 0
 
-        # KPI 卡片
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("💰 投資本金", f"${principal:,.0f}")
-        k2.metric("📊 資金配置", f"{total_pct:.1f}%",
-                  delta="✅ 已滿" if abs(total_pct - 100) < 0.1 else f"⚠️ 還差 {100 - total_pct:.1f}%")
-        k3.metric("🎯 預估年領總息", f"${total_income:,.0f}")
-        k4.metric("📈 年化配息率", f"{avg_yield:.2f}%")
-
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            st.metric("📅 預估月均領息", f"${total_income/12:,.0f}")
-        with col_m2:
-            st.metric("🗓️ 月最高領息月份", "計算中...")
-
-        # ── 逐月現金流計算 ──────────────────────
-        st.markdown("---")
-        st.subheader("📅 逐月現金流明細")
-
+        # 先算逐月現金流，KPI才能用
         months = ["一月","二月","三月","四月","五月","六月",
                   "七月","八月","九月","十月","十一月","十二月"]
         monthly_total = [0.0] * 12
@@ -1288,24 +1311,56 @@ with main_tab2:
 
         for item in cf_items:
             if item["type"] in ("FUND", "ELN"):
-                # 月配：每月都有
                 monthly_amt = item["annual_income"] / 12
                 for m in range(1, 13):
                     monthly_total[m-1] += monthly_amt
                     month_details[m].append((item["label"], item["name"][:12], monthly_amt))
             else:
-                # 債券：半年配，推算月份
                 m1, m2 = get_bond_pay_months(item["isin"])
                 semi_amt = item["annual_income"] / 2
                 for m in [m1, m2]:
                     monthly_total[m-1] += semi_amt
                     month_details[m].append((item["label"], item["name"][:12], semi_amt))
 
-        # 找最高月份
-        max_month_idx = monthly_total.index(max(monthly_total))
-        k4.metric("🗓️ 月最高領息月份", f"{months[max_month_idx]}（${monthly_total[max_month_idx]:,.0f}）")
+        max_m_idx = monthly_total.index(max(monthly_total))
+
+        # KPI 卡片
+        st.markdown(f"""
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+            <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
+                <div style="font-size:0.8rem;color:#666;">💰 投資本金</div>
+                <div style="font-size:1.3rem;font-weight:700;color:#1a2744;">${principal:,.0f}</div>
+            </div>
+            <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
+                <div style="font-size:0.8rem;color:#666;">📊 資金配置</div>
+                <div style="font-size:1.3rem;font-weight:700;color:{'#2e7d32' if abs(total_pct-100)<0.1 else '#c62828'};">{total_pct:.1f}%</div>
+                <div style="font-size:0.75rem;color:#888;">{'✅ 已滿' if abs(total_pct-100)<0.1 else f'⚠️ 還差{100-total_pct:.1f}%'}</div>
+            </div>
+            <div style="flex:1;min-width:150px;background:#fff9e6;border:2px solid #c8a84b;border-radius:10px;padding:16px;text-align:center;">
+                <div style="font-size:0.8rem;color:#666;">📈 年化配息率</div>
+                <div style="font-size:1.6rem;font-weight:700;color:#b8860b;">{avg_yield:.2f}%</div>
+            </div>
+            <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
+                <div style="font-size:0.8rem;color:#666;">🎯 預估年領總息</div>
+                <div style="font-size:1.3rem;font-weight:700;color:#1a2744;">${total_income:,.0f}</div>
+            </div>
+            <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
+                <div style="font-size:0.8rem;color:#666;">📅 預估月均領息</div>
+                <div style="font-size:1.3rem;font-weight:700;color:#1a2744;">${total_income/12:,.0f}</div>
+            </div>
+            <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
+                <div style="font-size:0.8rem;color:#666;">🗓️ 最高領息月份</div>
+                <div style="font-size:1.1rem;font-weight:700;color:#1565c0;">{months[max_m_idx]}</div>
+                <div style="font-size:0.85rem;color:#1565c0;">${monthly_total[max_m_idx]:,.0f}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
         # 現金流表格
+        # ── 逐月現金流明細 ──────────────────────
+        st.markdown("---")
+        st.subheader("📅 逐月現金流明細")
+
         cf_html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;border-radius:8px;overflow:hidden;">'
         cf_html += '<thead><tr>'
         cf_html += '<th style="background:#1a2744;color:white;padding:8px 12px;text-align:left;">月份</th>'
