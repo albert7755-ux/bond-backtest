@@ -432,7 +432,7 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
             "col_coupon": "Coupon", "col_mat": "Maturity",
             "col_period": "Period", "col_price": "Price", "col_coupon2": "Coupon",
             "col_total": "Total★", "col_year": "Year",
-            "disclaimer": "⚠️ Disclaimer: Price data sourced from TradingView for reference only. Not actual bank pricing. Total Return = Price Change + Coupon (estimated by holding days).",
+            "disclaimer": "⚠️ Disclaimer: Price data sourced from TradingView for reference only. Not actual bank pricing. Total Return = Price Change + Coupon (estimated by holding days). For internal education and training purposes only. Do not distribute.",
             "no_data": "No Data",
             "y_axis": "Total Return Index (Base=100, with coupon)",
         }
@@ -448,7 +448,7 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
             "col_coupon": "票息率", "col_mat": "到期年",
             "col_period": "期間", "col_price": "價格漲跌", "col_coupon2": "票息收益",
             "col_total": "總報酬★", "col_year": "年度",
-            "disclaimer": "⚠️ 免責聲明：本報告價格資料來源為 TradingView，此價格僅為中間價，並非本行實際報價，僅供參考，不構成投資建議。總報酬 = 價格漲跌 + 票息（依實際持有天數估算）。",
+            "disclaimer": "⚠️ 免責聲明：本報告價格資料來源為 TradingView，此價格僅為中間價，並非本行實際報價，僅供參考，不構成投資建議。總報酬 = 價格漲跌 + 票息（依實際持有天數估算）。本報告僅供內部教育訓練使用，請勿外流。",
             "no_data": "無資料",
             "y_axis": "總報酬指數（起始=100，含息）",
         }
@@ -1048,12 +1048,7 @@ if loaded:
     )
     lang_code = "zh" if report_lang == "中文版" else "en"
 
-    report_style = st.radio(
-        "報告風格",
-        ["🏦 富邦風格（深藍金色）", "📋 簡約專業（黑白灰）", "🎨 彩色活潑"],
-        horizontal=True
-    )
-    style_code = "fubon" if "富邦" in report_style else ("simple" if "簡約" in report_style else "colorful")
+    style_code = "fubon"
 
     max_years = st.slider("年度報酬顯示幾年", min_value=1, max_value=10, value=5, step=1)
 
@@ -1101,5 +1096,5 @@ else:
     """)
 
 st.markdown("---")
-st.warning("⚠️ **免責聲明**：本工具所顯示之價格資料來源為 TradingView，僅供參考，並非本行實際報價。實際申購價格以本行公告為準，投資人應自行評估風險。")
+st.warning("⚠️ **免責聲明**：本工具所顯示之價格資料來源為 TradingView，僅供參考，並非本行實際報價。實際申購價格以本行公告為準，投資人應自行評估風險。本工具**僅供內部教育訓練使用，請勿外流**。")
 st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 此價格僅為 TradingView 中間價，並非銀行報價 ｜ 僅供參考，不構成投資建議")
