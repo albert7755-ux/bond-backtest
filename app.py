@@ -1,11 +1,20 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import timedelta
+from datetime import timedelta, date
 import plotly.graph_objects as go
 import gspread
 from google.oauth2.service_account import Credentials
 import json
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import cm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image as RLImage, PageBreak
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 
 st.set_page_config(page_title="債券績效比較", layout="wide", page_icon="📊")
 
@@ -349,6 +358,224 @@ def color_cell(val):
     elif val < -0.0005: return "color:#c62828;font-weight:600;"
     return "color:#888;"
 
+def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, all_years, chart_start, chart_end):
+    """生成債券績效比較 PDF 報告"""
+    import io, os, tempfile
+    from datetime import date
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=1.8*cm, rightMargin=1.8*cm,
+        topMargin=2*cm, bottomMargin=2*cm
+    )
+
+    # 嘗試載入中文字體
+    font_name = "Helvetica"
+    try:
+        import requests as req
+        font_url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
+        # 使用系統可能有的字體
+        for path in ["/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                     "/System/Library/Fonts/PingFang.ttc"]:
+            if os.path.exists(path):
+                pdfmetrics.registerFont(TTFont("Chinese", path))
+                font_name = "Chinese"
+                break
+    except:
+        pass
+
+    # 顏色定義
+    NAVY    = colors.HexColor("#1a2744")
+    GOLD    = colors.HexColor("#c8a84b")
+    GREEN   = colors.HexColor("#2e7d32")
+    RED     = colors.HexColor("#c62828")
+    LIGHT   = colors.HexColor("#f0f4ff")
+    WHITE   = colors.white
+    GRAY    = colors.HexColor("#888888")
+    BG_GRAY = colors.HexColor("#f8f9fa")
+
+    bond_colors_hex = ["#1565c0","#c62828","#2e7d32","#6a1b9a","#e65100","#00838f"]
+    bond_colors_rl  = [colors.HexColor(h) for h in bond_colors_hex]
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("title", fontName=font_name, fontSize=22,
+                                 textColor=WHITE, alignment=TA_CENTER, spaceAfter=4)
+    sub_style   = ParagraphStyle("sub", fontName=font_name, fontSize=11,
+                                 textColor=colors.HexColor("#cce0ff"), alignment=TA_CENTER)
+    h2_style    = ParagraphStyle("h2", fontName=font_name, fontSize=13,
+                                 textColor=NAVY, spaceBefore=14, spaceAfter=6, fontWeight="bold")
+    body_style  = ParagraphStyle("body", fontName=font_name, fontSize=9,
+                                 textColor=colors.HexColor("#333333"), spaceAfter=4)
+    small_style = ParagraphStyle("small", fontName=font_name, fontSize=7.5,
+                                 textColor=GRAY)
+    warn_style  = ParagraphStyle("warn", fontName=font_name, fontSize=7.5,
+                                 textColor=colors.HexColor("#cc0000"),
+                                 backColor=colors.HexColor("#fff3cd"),
+                                 borderPadding=6, spaceBefore=8)
+
+    story = []
+
+    # ── 封面標題區 ──────────────────────────────────
+    title_table = Table([[Paragraph("📊 債券績效比較報告", title_style)],
+                         [Paragraph(f"比較區間：{chart_start} ～ {chart_end}　｜　製作日期：{date.today().strftime('%Y-%m-%d')}", sub_style)]],
+                        colWidths=[17*cm])
+    title_table.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,-1), NAVY),
+        ("ROUNDEDCORNERS", [8]),
+        ("TOPPADDING",    (0,0), (-1,-1), 14),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 14),
+    ]))
+    story.append(title_table)
+    story.append(Spacer(1, 0.5*cm))
+
+    # ── 一、債券基本資訊 ──────────────────────────────
+    story.append(Paragraph("一、債券基本資訊", h2_style))
+    story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
+
+    info_data = [["", "債券名稱", "ISIN", "發行機構", "票息率", "到期年"]]
+    for idx, (b, df) in enumerate(loaded):
+        isin = parse_filename(b["selected"])
+        info = LOCAL_DB.get(isin, {})
+        issuer  = info.get("issuer", "—")
+        coupon  = f"{info.get('coupon', '—')}%" if info.get('coupon') else "—"
+        maturity = info.get("maturity", "—")
+        info_data.append([
+            Paragraph(f"<font color='{bond_colors_hex[idx]}'>●</font> {b['label']}", body_style),
+            b["name"], isin, issuer, coupon, maturity
+        ])
+
+    info_table = Table(info_data, colWidths=[1*cm, 3.8*cm, 3*cm, 3.8*cm, 1.8*cm, 1.8*cm])
+    info_table.setStyle(TableStyle([
+        ("BACKGROUND",   (0,0), (-1,0), NAVY),
+        ("TEXTCOLOR",    (0,0), (-1,0), WHITE),
+        ("FONTNAME",     (0,0), (-1,-1), font_name),
+        ("FONTSIZE",     (0,0), (-1,-1), 8.5),
+        ("ALIGN",        (0,0), (-1,-1), "CENTER"),
+        ("VALIGN",       (0,0), (-1,-1), "MIDDLE"),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1), [BG_GRAY, WHITE]),
+        ("GRID",         (0,0), (-1,-1), 0.3, colors.HexColor("#dddddd")),
+        ("TOPPADDING",   (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING",(0,0), (-1,-1), 5),
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    # ── 二、各期間績效比較 ────────────────────────────
+    story.append(Paragraph("二、各期間績效比較", h2_style))
+    story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
+
+    # 表頭
+    header = ["期間"]
+    for b, _ in all_data:
+        short = b["name"][:8] + ("…" if len(b["name"]) > 8 else "")
+        header += [f"{b['label']}. 價格", "票息", "總報酬★"]
+    perf_data = [header]
+
+    def fmt_pct(val):
+        if val is None: return "—"
+        return f"{val:+.2%}"
+
+    for period_label, _ in periods:
+        row = [period_label]
+        for b, period_dict in all_data:
+            r = period_dict.get(period_label)
+            row += [fmt_pct(r["price"] if r else None),
+                    fmt_pct(r["coupon"] if r else None),
+                    fmt_pct(r["total"] if r else None)]
+        perf_data.append(row)
+
+    col_w = [2*cm] + [1.8*cm, 1.5*cm, 1.8*cm] * len(all_data)
+    perf_table = Table(perf_data, colWidths=col_w)
+    ts = [
+        ("BACKGROUND",   (0,0), (-1,0), NAVY),
+        ("TEXTCOLOR",    (0,0), (-1,0), WHITE),
+        ("FONTNAME",     (0,0), (-1,-1), font_name),
+        ("FONTSIZE",     (0,0), (-1,-1), 8),
+        ("ALIGN",        (0,0), (-1,-1), "CENTER"),
+        ("VALIGN",       (0,0), (-1,-1), "MIDDLE"),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1), [BG_GRAY, WHITE]),
+        ("GRID",         (0,0), (-1,-1), 0.3, colors.HexColor("#dddddd")),
+        ("TOPPADDING",   (0,0), (-1,-1), 5),
+        ("BOTTOMPADDING",(0,0), (-1,-1), 5),
+    ]
+    # 總報酬欄金色背景
+    for col_idx in range(len(all_data)):
+        total_col = 1 + col_idx * 3 + 2
+        ts.append(("BACKGROUND", (total_col, 1), (total_col, -1), colors.HexColor("#fffde7")))
+        ts.append(("TEXTCOLOR",  (total_col, 1), (total_col, -1), colors.HexColor("#b8860b")))
+    perf_table.setStyle(TableStyle(ts))
+    story.append(perf_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    # ── 三、走勢圖 ────────────────────────────────────
+    story.append(PageBreak())
+    story.append(Paragraph("三、價格走勢圖（標準化，含息）", h2_style))
+    story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
+
+    try:
+        fig_pdf = go.Figure()
+        for idx, (b, df) in enumerate(loaded_filtered):
+            if df.empty: continue
+            tri = total_return_index(df, b["coupon"])
+            fig_pdf.add_trace(go.Scatter(
+                x=df["date"], y=tri,
+                name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=bond_colors_hex[idx], width=2.5)
+            ))
+        fig_pdf.update_layout(
+            yaxis_title="總報酬指數（起始=100，含息）",
+            hovermode="x unified", height=380, width=650,
+            margin=dict(l=40, r=20, t=20, b=40),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            paper_bgcolor="white", plot_bgcolor="#f8f9ff"
+        )
+        img_bytes = fig_pdf.to_image(format="png", scale=2)
+        img_buf = io.BytesIO(img_bytes)
+        rl_img = RLImage(img_buf, width=15*cm, height=8.5*cm)
+        story.append(rl_img)
+    except Exception as e:
+        story.append(Paragraph(f"⚠️ 走勢圖無法生成（請確認已安裝 kaleido）：{e}", small_style))
+
+    story.append(Spacer(1, 0.4*cm))
+
+    # ── 四、年度報酬 ──────────────────────────────────
+    story.append(Paragraph("四、年度報酬回顧", h2_style))
+    story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
+
+    ann_header = ["年度"]
+    for b, _ in all_annual:
+        short = b["name"][:8] + ("…" if len(b["name"]) > 8 else "")
+        ann_header += [f"{b['label']}. 價格", "票息", "總報酬"]
+    ann_data = [ann_header]
+
+    for year in all_years:
+        row = [year]
+        for b, rows in all_annual:
+            r = next((x for x in rows if x["year"] == year), None)
+            row += [fmt_pct(r["price"] if r else None),
+                    fmt_pct(r["coupon"] if r else None),
+                    fmt_pct(r["total"] if r else None)]
+        ann_data.append(row)
+
+    ann_table = Table(ann_data, colWidths=col_w)
+    ann_table.setStyle(TableStyle(ts))
+    story.append(ann_table)
+    story.append(Spacer(1, 0.4*cm))
+
+    # ── 五、免責聲明 ──────────────────────────────────
+    story.append(HRFlowable(width="100%", thickness=1, color=GRAY, spaceBefore=8, spaceAfter=6))
+    disclaimer = (
+        "⚠️ 免責聲明：本報告所顯示之價格資料來源為 TradingView，此價格僅為中間價，並非本行實際報價，"
+        "僅供參考，不構成投資建議。實際申購價格以本行公告為準，投資人應自行評估風險。"
+        "總報酬 = 價格漲跌 + 票息（依實際持有天數估算）。"
+    )
+    story.append(Paragraph(disclaimer, warn_style))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
+
 
 # ==========================================
 # 主介面
@@ -690,6 +917,41 @@ if loaded:
     ann_html += "</tbody></table>"
     st.markdown(ann_html, unsafe_allow_html=True)
 
+    # ==========================================
+    # 四、生成 PDF 報告
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📄 生成比較報告")
+    st.caption("點擊下方按鈕，生成包含債券基本資訊、績效比較、走勢圖、年度報酬的精美 PDF 報告")
+
+    if st.button("🖨️ 生成 PDF 報告", type="primary", use_container_width=True):
+        with st.spinner("正在生成報告，請稍候..."):
+            try:
+                pdf_buf = generate_pdf_report(
+                    loaded=loaded,
+                    loaded_filtered=loaded_filtered,
+                    all_data=all_data,
+                    periods=periods,
+                    all_annual=all_annual,
+                    all_years=all_years,
+                    chart_start=str(chart_start),
+                    chart_end=str(chart_end)
+                )
+                report_date = date.today().strftime("%Y%m%d")
+                bond_names = "_".join([b["label"] for b, _ in loaded])
+                filename = f"債券績效比較_{bond_names}_{report_date}.pdf"
+                st.download_button(
+                    label="📥 下載 PDF 報告",
+                    data=pdf_buf,
+                    file_name=filename,
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+                st.success("✅ 報告生成完成！點擊上方按鈕下載。")
+            except Exception as e:
+                st.error(f"❌ 報告生成失敗：{e}")
+                st.info("💡 請確認 requirements.txt 已包含 reportlab 和 kaleido")
+
 else:
     st.info("👆 請在上方選擇至少一檔債券開始分析")
     st.markdown("""
@@ -703,4 +965,4 @@ else:
 
 st.markdown("---")
 st.warning("⚠️ **免責聲明**：本工具所顯示之價格資料來源為 TradingView，僅供參考，並非本行實際報價。實際申購價格以本行公告為準，投資人應自行評估風險。")
-st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 此價格僅為 TradingView 收盤價，並非銀行報價 ｜ 僅供參考，不構成投資建議")
+st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 此價格僅為 TradingView 中間價，並非銀行報價 ｜ 僅供參考，不構成投資建議")
