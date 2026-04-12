@@ -702,757 +702,413 @@ st.markdown("## 📊 債券投資工具")
 st.markdown("---")
 
 # 主分頁
-main_tab1, main_tab2 = st.tabs(["📈 績效回測比較", "🎉 金開心試算"])
 
-with main_tab1:
-    st.markdown("從 Google Drive `bond-data` 資料夾自動讀取，選擇債券後立即比較績效")
+st.markdown("從 Google Drive `bond-data` 資料夾自動讀取，選擇債券後立即比較績效")
 
-    # 讀取資料夾中的試算表清單
-    folder_id = st.secrets.get("FOLDER_ID", "")
+# 讀取資料夾中的試算表清單
+folder_id = st.secrets.get("FOLDER_ID", "")
 
-    try:
-        with st.spinner("正在讀取 bond-data 資料夾..."):
-            files = list_sheets_in_folder(folder_id)
+try:
+    with st.spinner("正在讀取 bond-data 資料夾..."):
+        files = list_sheets_in_folder(folder_id)
+
+    if not files:
+        st.warning("⚠️ bond-data 資料夾中沒有試算表，請先上傳 CSV 並確認已轉換為 Google 試算表格式。")
+        st.stop()
+
+    # 建立選單選項：顯示「債券名稱（ISIN）」格式
+    file_options = {f["name"]: f["id"] for f in files}
+    file_names = list(file_options.keys())
+
+    # 預載所有 ISIN 資訊
+    all_isins = [parse_filename(name) for name in file_names]
+    all_isins_clean = [isin for isin in all_isins if isin]
+    if all_isins_clean:
+        bond_info_cache = batch_lookup_bond_info(tuple(all_isins_clean))
+    else:
+        bond_info_cache = {}
+
+    # 建立「顯示名稱 → 原始檔名」對照，並按名稱排序
+    def make_display_name(file_name):
+        isin = parse_filename(file_name)
+        if isin and isin in bond_info_cache:
+            info = bond_info_cache[isin]
+            issuer = info["issuer"]
+            coupon = info["coupon"]
+            maturity = info["maturity"]
+            if issuer and issuer != isin:
+                return f"{issuer}（{isin}）"
+        return file_name
+
+    display_to_file = {make_display_name(f): f for f in file_names}
+    # 按顯示名稱排序
+    display_names = sorted(display_to_file.keys())
+
+except Exception as e:
+    st.error(f"❌ 無法連接 Google Drive：{e}")
+    st.stop()
+
+# 選檔數
+n = st.radio("比較幾檔債券？", [2, 3, 4, 5, 6], horizontal=True)
+st.markdown("---")
+
+# 動態產生選單
+bonds = []
+cols = st.columns(n)
+for i in range(n):
+    with cols[i]:
+        color = COLORS[i]
+        label = LABELS[i]
+        st.markdown(f'<span class="bond-tag" style="background:{color}">債券 {label}</span>', unsafe_allow_html=True)
     
-        if not files:
-            st.warning("⚠️ bond-data 資料夾中沒有試算表，請先上傳 CSV 並確認已轉換為 Google 試算表格式。")
-            st.stop()
-    
-        # 建立選單選項：顯示「債券名稱（ISIN）」格式
-        file_options = {f["name"]: f["id"] for f in files}
-        file_names = list(file_options.keys())
+        selected_display = st.selectbox(
+            f"選擇債券",
+            options=["（請選擇）"] + display_names,
+            key=f"sel_{i}"
+        )
+        selected = display_to_file.get(selected_display, "") if selected_display != "（請選擇）" else ""
 
-        # 預載所有 ISIN 資訊
-        all_isins = [parse_filename(name) for name in file_names]
-        all_isins_clean = [isin for isin in all_isins if isin]
-        if all_isins_clean:
-            bond_info_cache = batch_lookup_bond_info(tuple(all_isins_clean))
-        else:
-            bond_info_cache = {}
-
-        # 建立「顯示名稱 → 原始檔名」對照，並按名稱排序
-        def make_display_name(file_name):
-            isin = parse_filename(file_name)
+        # 從預載快取取債券資訊
+        if selected:
+            isin = parse_filename(selected)
             if isin and isin in bond_info_cache:
                 info = bond_info_cache[isin]
                 issuer = info["issuer"]
-                coupon = info["coupon"]
+                auto_coupon = info["coupon"]
                 maturity = info["maturity"]
-                if issuer and issuer != isin:
-                    return f"{issuer}（{isin}）"
-            return file_name
-
-        display_to_file = {make_display_name(f): f for f in file_names}
-        # 按顯示名稱排序
-        display_names = sorted(display_to_file.keys())
-
-    except Exception as e:
-        st.error(f"❌ 無法連接 Google Drive：{e}")
-        st.stop()
-
-    # 選檔數
-    n = st.radio("比較幾檔債券？", [2, 3, 4, 5, 6], horizontal=True)
-    st.markdown("---")
-
-    # 動態產生選單
-    bonds = []
-    cols = st.columns(n)
-    for i in range(n):
-        with cols[i]:
-            color = COLORS[i]
-            label = LABELS[i]
-            st.markdown(f'<span class="bond-tag" style="background:{color}">債券 {label}</span>', unsafe_allow_html=True)
-        
-            selected_display = st.selectbox(
-                f"選擇債券",
-                options=["（請選擇）"] + display_names,
-                key=f"sel_{i}"
-            )
-            selected = display_to_file.get(selected_display, "") if selected_display != "（請選擇）" else ""
-
-            # 從預載快取取債券資訊
-            if selected:
-                isin = parse_filename(selected)
-                if isin and isin in bond_info_cache:
-                    info = bond_info_cache[isin]
-                    issuer = info["issuer"]
-                    auto_coupon = info["coupon"]
-                    maturity = info["maturity"]
-                    default_name = f"{issuer} {auto_coupon}% {maturity}".strip() if issuer != isin else selected
-                    default_coupon = auto_coupon
-                    if st.session_state.get(f"last_sel_{i}") != selected_display:
-                        st.session_state[f"name_{i}"] = default_name
-                        st.session_state[f"coupon_{i}"] = default_coupon
-                        st.session_state[f"last_sel_{i}"] = selected_display
-                    if auto_coupon > 0:
-                        st.success(f"✅ {isin}｜票息 {auto_coupon}%｜到期 {maturity}")
-                else:
-                    if st.session_state.get(f"last_sel_{i}") != selected_display:
-                        st.session_state[f"name_{i}"] = selected
-                        st.session_state[f"coupon_{i}"] = 0.0
-                        st.session_state[f"last_sel_{i}"] = selected_display
+                default_name = f"{issuer} {auto_coupon}% {maturity}".strip() if issuer != isin else selected
+                default_coupon = auto_coupon
+                if st.session_state.get(f"last_sel_{i}") != selected_display:
+                    st.session_state[f"name_{i}"] = default_name
+                    st.session_state[f"coupon_{i}"] = default_coupon
+                    st.session_state[f"last_sel_{i}"] = selected_display
+                if auto_coupon > 0:
+                    st.success(f"✅ {isin}｜票息 {auto_coupon}%｜到期 {maturity}")
             else:
                 if st.session_state.get(f"last_sel_{i}") != selected_display:
-                    st.session_state[f"name_{i}"] = ""
+                    st.session_state[f"name_{i}"] = selected
                     st.session_state[f"coupon_{i}"] = 0.0
                     st.session_state[f"last_sel_{i}"] = selected_display
+        else:
+            if st.session_state.get(f"last_sel_{i}") != selected_display:
+                st.session_state[f"name_{i}"] = ""
+                st.session_state[f"coupon_{i}"] = 0.0
+                st.session_state[f"last_sel_{i}"] = selected_display
 
-            name = st.text_input("債券名稱（可修改）", placeholder="例：Apple 3% 2027", key=f"name_{i}")
-            coupon = st.number_input("票息率 % （可修改）", step=0.01, min_value=0.0, max_value=20.0, key=f"coupon_{i}")
-        
-            sheet_id = file_options.get(selected) if selected else None
-            bonds.append({
-                "sheet_id": sheet_id,
-                "name": name or f"債券{label}",
-                "coupon": coupon,
-                "color": color,
-                "label": label,
-                "selected": selected
-            })
+        name = st.text_input("債券名稱（可修改）", placeholder="例：Apple 3% 2027", key=f"name_{i}")
+        coupon = st.number_input("票息率 % （可修改）", step=0.01, min_value=0.0, max_value=20.0, key=f"coupon_{i}")
+    
+        sheet_id = file_options.get(selected) if selected else None
+        bonds.append({
+            "sheet_id": sheet_id,
+            "name": name or f"債券{label}",
+            "coupon": coupon,
+            "color": color,
+            "label": label,
+            "selected": selected
+        })
 
-    st.markdown("---")
+st.markdown("---")
 
-    # 讀取選中的試算表
-    loaded = []
-    for b in bonds:
-        if b["sheet_id"]:
-            try:
-                with st.spinner(f"讀取 {b['selected']}..."):
-                    df = read_sheet(b["sheet_id"])
-                loaded.append((b, df))
-            except Exception as e:
-                st.error(f"❌ 讀取 {b['selected']} 失敗：{e}")
+# 讀取選中的試算表
+loaded = []
+for b in bonds:
+    if b["sheet_id"]:
+        try:
+            with st.spinner(f"讀取 {b['selected']}..."):
+                df = read_sheet(b["sheet_id"])
+            loaded.append((b, df))
+        except Exception as e:
+            st.error(f"❌ 讀取 {b['selected']} 失敗：{e}")
 
-    if loaded:
-        periods = [("1個月",30),("3個月",90),("6個月",180),
-                   ("1年",365),("2年",730),("3年",1095),("5年",1825)]
+if loaded:
+    periods = [("1個月",30),("3個月",90),("6個月",180),
+               ("1年",365),("2年",730),("3年",1095),("5年",1825)]
 
-        # 資料期間
-        info_cols = st.columns(len(loaded))
-        for idx, (b, df) in enumerate(loaded):
-            with info_cols[idx]:
-                st.markdown(f'<span class="bond-tag" style="background:{b["color"]}">{b["label"]}</span> **{b["name"]}**', unsafe_allow_html=True)
-                st.caption(f"{df['date'].min().strftime('%Y-%m-%d')} ～ {df['date'].max().strftime('%Y-%m-%d')}（{len(df)} 筆）")
+    # 資料期間
+    info_cols = st.columns(len(loaded))
+    for idx, (b, df) in enumerate(loaded):
+        with info_cols[idx]:
+            st.markdown(f'<span class="bond-tag" style="background:{b["color"]}">{b["label"]}</span> **{b["name"]}**', unsafe_allow_html=True)
+            st.caption(f"{df['date'].min().strftime('%Y-%m-%d')} ～ {df['date'].max().strftime('%Y-%m-%d')}（{len(df)} 筆）")
 
-        all_data = [(b, {label: calc_period(df, b["coupon"], days) for label, days in periods}) for b, df in loaded]
+    all_data = [(b, {label: calc_period(df, b["coupon"], days) for label, days in periods}) for b, df in loaded]
 
-        # ==========================================
-        # 一、各期間績效比較表
-        # ==========================================
-        st.subheader("🏆 各期間績效比較")
+    # ==========================================
+    # 一、各期間績效比較表
+    # ==========================================
+    st.subheader("🏆 各期間績效比較")
 
-        html = '<table class="compare-table"><thead><tr>'
-        html += '<th class="period-col" rowspan="2">期間</th>'
-        for idx, (b, _) in enumerate(all_data):
+    html = '<table class="compare-table"><thead><tr>'
+    html += '<th class="period-col" rowspan="2">期間</th>'
+    for idx, (b, _) in enumerate(all_data):
+        if idx > 0:
+            html += '<th class="divider" rowspan="2"></th>'
+        short = b["name"][:14] + ("…" if len(b["name"]) > 14 else "")
+        html += f'<th colspan="3" style="background:{b["color"]};color:white;">{b["label"]}. {short}</th>'
+    html += "</tr><tr>"
+    for idx in range(len(all_data)):
+        html += '<th class="sub-header">價格漲跌</th><th class="sub-header">票息收益</th><th class="hl">總報酬 ★</th>'
+    html += "</tr></thead><tbody>"
+
+    for period_label, _ in periods:
+        html += f'<tr><td class="period-col">{period_label}</td>'
+        for idx, (b, period_data) in enumerate(all_data):
             if idx > 0:
-                html += '<th class="divider" rowspan="2"></th>'
-            short = b["name"][:14] + ("…" if len(b["name"]) > 14 else "")
-            html += f'<th colspan="3" style="background:{b["color"]};color:white;">{b["label"]}. {short}</th>'
-        html += "</tr><tr>"
-        for idx in range(len(all_data)):
-            html += '<th class="sub-header">價格漲跌</th><th class="sub-header">票息收益</th><th class="hl">總報酬 ★</th>'
-        html += "</tr></thead><tbody>"
-
-        for period_label, _ in periods:
-            html += f'<tr><td class="period-col">{period_label}</td>'
-            for idx, (b, period_data) in enumerate(all_data):
-                if idx > 0:
-                    html += '<td class="divider"></td>'
-                r = period_data.get(period_label)
-                html += f'<td>{fmt(r["price"]) if r else "—"}</td>'
-                html += f'<td>{fmt(r["coupon"]) if r else "—"}</td>'
-                html += f'<td class="hl">{fmt(r["total"], bold=True) if r else "—"}</td>'
-            html += "</tr>"
-
-        # 勝出統計
-        wins = [0] * len(all_data)
-        for period_label, _ in periods:
-            valid = [(i, all_data[i][1].get(period_label)) for i in range(len(all_data))]
-            valid = [(i, r) for i, r in valid if r]
-            if valid:
-                best = max(r["total"] for _, r in valid)
-                for i, r in valid:
-                    if r["total"] >= best - 0.0001:
-                        wins[i] += 1
-
-        html += '<tr style="background:#1a2744;"><td class="period-col" style="background:#1a2744;color:#ffd700;font-weight:700;">🏆 勝出</td>'
-        for idx, (b, _) in enumerate(all_data):
-            if idx > 0:
-                html += '<td class="divider" style="background:#0d1b33;"></td>'
-            html += f'<td colspan="2" style="text-align:center;color:#ccc;font-size:0.8rem;">{b["label"]}. {b["name"][:8]}</td>'
-            html += f'<td style="text-align:center;color:#ffd700;font-weight:700;">{wins[idx]} 期間</td>'
+                html += '<td class="divider"></td>'
+            r = period_data.get(period_label)
+            html += f'<td>{fmt(r["price"]) if r else "—"}</td>'
+            html += f'<td>{fmt(r["coupon"]) if r else "—"}</td>'
+            html += f'<td class="hl">{fmt(r["total"], bold=True) if r else "—"}</td>'
         html += "</tr>"
 
-        max_wins = max(wins)
-        winners = [all_data[i][0] for i, w in enumerate(wins) if w == max_wins]
-        if len(winners) == 1:
-            w = winners[0]
-            overall = f'🏆 整體較佳：{w["label"]}. {w["name"]}'
-            oc = w["color"]
-        else:
-            overall = "🤝 勢均力敵：" + "、".join(f'{w["label"]}.{w["name"][:6]}' for w in winners)
-            oc = "#888"
+    # 勝出統計
+    wins = [0] * len(all_data)
+    for period_label, _ in periods:
+        valid = [(i, all_data[i][1].get(period_label)) for i in range(len(all_data))]
+        valid = [(i, r) for i, r in valid if r]
+        if valid:
+            best = max(r["total"] for _, r in valid)
+            for i, r in valid:
+                if r["total"] >= best - 0.0001:
+                    wins[i] += 1
 
-        total_cols = len(all_data) * 3 + (len(all_data) - 1) + 1
-        html += f'<tr><td colspan="{total_cols}" style="text-align:center;background:{oc}18;color:{oc};font-weight:700;padding:14px;font-size:0.95rem;">{overall}</td></tr>'
-        html += "</tbody></table>"
-        st.markdown(html, unsafe_allow_html=True)
+    html += '<tr style="background:#1a2744;"><td class="period-col" style="background:#1a2744;color:#ffd700;font-weight:700;">🏆 勝出</td>'
+    for idx, (b, _) in enumerate(all_data):
+        if idx > 0:
+            html += '<td class="divider" style="background:#0d1b33;"></td>'
+        html += f'<td colspan="2" style="text-align:center;color:#ccc;font-size:0.8rem;">{b["label"]}. {b["name"][:8]}</td>'
+        html += f'<td style="text-align:center;color:#ffd700;font-weight:700;">{wins[idx]} 期間</td>'
+    html += "</tr>"
 
-        st.markdown("""
-        <div class="legend">
-            <div class="legend-item"><span class="dot" style="background:#c8a84b;"></span>★ 總報酬 = 價格漲跌 + 票息（依實際持有天數）</div>
-            <div class="legend-item"><span class="dot" style="background:#2e7d32;"></span>綠色 = 正報酬</div>
-            <div class="legend-item"><span class="dot" style="background:#c62828;"></span>紅色 = 負報酬</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # ==========================================
-        # 二、走勢圖
-        # ==========================================
-        st.markdown("---")
-        st.subheader("📈 價格走勢圖")
-
-        # 找出所有已載入債券的最早和最晚日期
-        all_min_date = min(df["date"].min() for _, df in loaded).date()
-        all_max_date = max(df["date"].max() for _, df in loaded).date()
-
-        from datetime import date, timedelta
-        today = all_max_date
-
-        # 初始化 session_state
-        if "chart_start" not in st.session_state:
-            st.session_state["chart_start"] = all_min_date
-        if "chart_end" not in st.session_state:
-            st.session_state["chart_end"] = all_max_date
-
-        # 每次都確保日期在合法範圍內（換標的後範圍可能改變）
-        st.session_state["chart_start"] = max(min(st.session_state["chart_start"], all_max_date), all_min_date)
-        st.session_state["chart_end"] = max(min(st.session_state["chart_end"], all_max_date), all_min_date)
-
-        # 快速選擇按鈕
-        st.markdown("**快速選擇區間：**")
-        qcol1, qcol2, qcol3, qcol4, qcol5 = st.columns(5)
-        if qcol1.button("1年"):
-            st.session_state["chart_start"] = max(today - timedelta(days=365), all_min_date)
-            st.rerun()
-        if qcol2.button("2年"):
-            st.session_state["chart_start"] = max(today - timedelta(days=730), all_min_date)
-            st.rerun()
-        if qcol3.button("3年"):
-            st.session_state["chart_start"] = max(today - timedelta(days=1095), all_min_date)
-            st.rerun()
-        if qcol4.button("5年"):
-            st.session_state["chart_start"] = max(today - timedelta(days=1825), all_min_date)
-            st.rerun()
-        if qcol5.button("全部"):
-            st.session_state["chart_start"] = all_min_date
-            st.rerun()
-
-        date_col1, date_col2 = st.columns(2)
-        with date_col1:
-            chart_start = st.date_input(
-                "📅 圖表起始日",
-                value=st.session_state["chart_start"],
-                min_value=all_min_date,
-                max_value=all_max_date,
-            )
-            st.session_state["chart_start"] = chart_start
-        with date_col2:
-            chart_end = st.date_input(
-                "📅 圖表結束日",
-                value=st.session_state["chart_end"],
-                min_value=all_min_date,
-                max_value=all_max_date,
-            )
-            st.session_state["chart_end"] = chart_end
-
-        # 篩選後的 loaded
-        chart_start_ts = pd.Timestamp(chart_start)
-        chart_end_ts = pd.Timestamp(chart_end)
-        loaded_filtered = [
-            (b, df[(df["date"] >= chart_start_ts) & (df["date"] <= chart_end_ts)].copy())
-            for b, df in loaded
-        ]
-
-        tab1, tab2, tab3 = st.tabs(["📊 標準化（不含息）", "📊 標準化（含息）", "💰 實際價格"])
-
-        with tab1:
-            st.info("📌 純價格走勢，**不含票息**。起始=100，僅反映債券市價漲跌。")
-            fig = go.Figure()
-            for b, df in loaded_filtered:
-                if df.empty: continue
-                norm = df["close"] / df["close"].iloc[0] * 100
-                fig.add_trace(go.Scatter(x=df["date"], y=norm, name=f'{b["label"]}. {b["name"]}',
-                    line=dict(color=b["color"], width=2)))
-            fig.update_layout(yaxis_title="相對價格（起始=100，不含息）", hovermode="x unified", height=430,
-                              legend=dict(orientation="h", yanchor="bottom", y=1.02))
-            st.plotly_chart(fig, use_container_width=True)
-
-        with tab2:
-            st.info("📌 **含票息**的總報酬指數。起始=100，每日將票息（年票息率 ÷ 365）累積計入，完整反映持有人實際拿到的報酬。")
-            fig2 = go.Figure()
-            for b, df in loaded_filtered:
-                if df.empty: continue
-                tri = total_return_index(df, b["coupon"])
-                fig2.add_trace(go.Scatter(x=df["date"], y=tri, name=f'{b["label"]}. {b["name"]}',
-                    line=dict(color=b["color"], width=2)))
-            fig2.update_layout(yaxis_title="總報酬指數（起始=100，含息）", hovermode="x unified", height=430,
-                               legend=dict(orientation="h", yanchor="bottom", y=1.02))
-            st.plotly_chart(fig2, use_container_width=True)
-
-        with tab3:
-            st.info("📌 TradingView 原始收盤價，面值100為基準，**不含票息**。")
-            fig3 = go.Figure()
-            for b, df in loaded_filtered:
-                if df.empty: continue
-                fig3.add_trace(go.Scatter(x=df["date"], y=df["close"], name=f'{b["label"]}. {b["name"]}',
-                    line=dict(color=b["color"], width=2)))
-            fig3.update_layout(yaxis_title="價格（面值100）", hovermode="x unified", height=430,
-                               legend=dict(orientation="h", yanchor="bottom", y=1.02))
-            st.plotly_chart(fig3, use_container_width=True)
-
-        # ==========================================
-        # 三、年度報酬表
-        # ==========================================
-        st.markdown("---")
-        st.subheader("📅 年度報酬回顧")
-
-        all_annual = [(b, calc_annual(df, b["coupon"])) for b, df in loaded]
-        all_years = sorted(set(r["year"] for _, rows in all_annual for r in rows), reverse=True)
-
-        ann_html = '<table style="width:100%;border-collapse:collapse;font-size:0.84rem;border-radius:8px;overflow:hidden;">'
-        ann_html += '<thead><tr><th style="background:#1a2744;color:white;padding:8px 12px;text-align:left;">年度</th>'
-        for b, _ in all_annual:
-            short = b["name"][:12] + ("…" if len(b["name"]) > 12 else "")
-            ann_html += f'<th style="background:{b["color"]};color:white;padding:8px 12px;text-align:center;">{b["label"]}. {short}<br><small style="font-weight:400;">價格漲跌</small></th>'
-            ann_html += f'<th style="background:{b["color"]};color:white;padding:8px 12px;text-align:center;">票息收益</th>'
-            ann_html += f'<th style="background:{b["color"]};color:white;padding:8px 12px;text-align:center;">總報酬 ★</th>'
-        ann_html += "</tr></thead><tbody>"
-
-        for year in all_years:
-            ann_html += f'<tr><td style="padding:7px 12px;font-weight:700;color:#1a2744;border-bottom:1px solid #f0f0f0;">{year}</td>'
-            for b, rows in all_annual:
-                row = next((r for r in rows if r["year"] == year), None)
-                if row:
-                    ann_html += f'<td style="padding:7px 12px;text-align:center;border-bottom:1px solid #f0f0f0;{color_cell(row["price"])}">{row["price"]:+.2%}</td>'
-                    ann_html += f'<td style="padding:7px 12px;text-align:center;border-bottom:1px solid #f0f0f0;color:#2e7d32;">{row["coupon"]:+.2%}</td>'
-                    ann_html += f'<td style="padding:7px 12px;text-align:center;border-bottom:1px solid #f0f0f0;{color_cell(row["total"])}font-weight:700;">{row["total"]:+.2%}</td>'
-                else:
-                    ann_html += '<td colspan="3" style="text-align:center;color:#ccc;border-bottom:1px solid #f0f0f0;">無資料</td>'
-            ann_html += "</tr>"
-
-        ann_html += "</tbody></table>"
-        st.markdown(ann_html, unsafe_allow_html=True)
-
-        # ==========================================
-        # 四、生成 PDF 報告
-        # ==========================================
-        st.markdown("---")
-        st.subheader("📄 生成比較報告")
-        st.caption("點擊下方按鈕，生成包含債券基本資訊、績效比較、走勢圖、年度報酬的精美 PDF 報告")
-
-        report_lang = st.radio(
-            "報告語言版本",
-            ["中文版", "English"],
-            horizontal=True
-        )
-        lang_code = "zh" if report_lang == "中文版" else "en"
-
-        style_code = "fubon"
-
-        max_years = st.slider("年度報酬顯示幾年", min_value=1, max_value=10, value=5, step=1)
-
-        if st.button("🖨️ 生成 PDF 報告", type="primary", use_container_width=True):
-            with st.spinner("正在生成報告，請稍候..."):
-                try:
-                    pdf_buf = generate_pdf_report(
-                        loaded=loaded,
-                        loaded_filtered=loaded_filtered,
-                        all_data=all_data,
-                        periods=periods,
-                        all_annual=all_annual,
-                        all_years=all_years,
-                        chart_start=str(chart_start),
-                        chart_end=str(chart_end),
-                        lang=lang_code,
-                        style=style_code,
-                        max_years=max_years
-                    )
-                    report_date = date.today().strftime("%Y%m%d")
-                    bond_names = "_".join([b["label"] for b, _ in loaded])
-                    suffix = "ZH" if lang_code == "zh" else "EN"
-                    filename = f"Bond_Report_{bond_names}_{report_date}_{suffix}.pdf"
-                    st.download_button(
-                        label="📥 下載 PDF 報告",
-                        data=pdf_buf,
-                        file_name=filename,
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
-                    st.success("✅ 報告生成完成！點擊上方按鈕下載。")
-                except Exception as e:
-                    st.error(f"❌ 報告生成失敗：{e}")
-                    st.info("💡 請確認 requirements.txt 已包含 reportlab 和 matplotlib")
-
+    max_wins = max(wins)
+    winners = [all_data[i][0] for i, w in enumerate(wins) if w == max_wins]
+    if len(winners) == 1:
+        w = winners[0]
+        overall = f'🏆 整體較佳：{w["label"]}. {w["name"]}'
+        oc = w["color"]
     else:
-        st.info("👆 請在上方選擇至少一檔債券開始分析")
-        st.markdown("""
-        **如何新增債券資料？**
-        1. 在 TradingView 搜尋債券 ISIN（需 Plus 以上方案）
-        2. 開啟圖表，時間軸往左捲到最左邊
-        3. 右上角選單 → **匯出圖表資料...**
-        4. 上傳 CSV 到 Google 雲端硬碟的 `bond-data` 資料夾
-        5. 重新整理此頁面，下拉選單會自動更新！
-        """)
+        overall = "🤝 勢均力敵：" + "、".join(f'{w["label"]}.{w["name"][:6]}' for w in winners)
+        oc = "#888"
+
+    total_cols = len(all_data) * 3 + (len(all_data) - 1) + 1
+    html += f'<tr><td colspan="{total_cols}" style="text-align:center;background:{oc}18;color:{oc};font-weight:700;padding:14px;font-size:0.95rem;">{overall}</td></tr>'
+    html += "</tbody></table>"
+    st.markdown(html, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="legend">
+        <div class="legend-item"><span class="dot" style="background:#c8a84b;"></span>★ 總報酬 = 價格漲跌 + 票息（依實際持有天數）</div>
+        <div class="legend-item"><span class="dot" style="background:#2e7d32;"></span>綠色 = 正報酬</div>
+        <div class="legend-item"><span class="dot" style="background:#c62828;"></span>紅色 = 負報酬</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ==========================================
+    # 二、走勢圖
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📈 價格走勢圖")
+
+    # 找出所有已載入債券的最早和最晚日期
+    all_min_date = min(df["date"].min() for _, df in loaded).date()
+    all_max_date = max(df["date"].max() for _, df in loaded).date()
+
+    from datetime import date, timedelta
+    today = all_max_date
+
+    # 初始化 session_state
+    if "chart_start" not in st.session_state:
+        st.session_state["chart_start"] = all_min_date
+    if "chart_end" not in st.session_state:
+        st.session_state["chart_end"] = all_max_date
+
+    # 每次都確保日期在合法範圍內（換標的後範圍可能改變）
+    st.session_state["chart_start"] = max(min(st.session_state["chart_start"], all_max_date), all_min_date)
+    st.session_state["chart_end"] = max(min(st.session_state["chart_end"], all_max_date), all_min_date)
+
+    # 快速選擇按鈕
+    st.markdown("**快速選擇區間：**")
+    qcol1, qcol2, qcol3, qcol4, qcol5 = st.columns(5)
+    if qcol1.button("1年"):
+        st.session_state["chart_start"] = max(today - timedelta(days=365), all_min_date)
+        st.rerun()
+    if qcol2.button("2年"):
+        st.session_state["chart_start"] = max(today - timedelta(days=730), all_min_date)
+        st.rerun()
+    if qcol3.button("3年"):
+        st.session_state["chart_start"] = max(today - timedelta(days=1095), all_min_date)
+        st.rerun()
+    if qcol4.button("5年"):
+        st.session_state["chart_start"] = max(today - timedelta(days=1825), all_min_date)
+        st.rerun()
+    if qcol5.button("全部"):
+        st.session_state["chart_start"] = all_min_date
+        st.rerun()
+
+    date_col1, date_col2 = st.columns(2)
+    with date_col1:
+        chart_start = st.date_input(
+            "📅 圖表起始日",
+            value=st.session_state["chart_start"],
+            min_value=all_min_date,
+            max_value=all_max_date,
+        )
+        st.session_state["chart_start"] = chart_start
+    with date_col2:
+        chart_end = st.date_input(
+            "📅 圖表結束日",
+            value=st.session_state["chart_end"],
+            min_value=all_min_date,
+            max_value=all_max_date,
+        )
+        st.session_state["chart_end"] = chart_end
+
+    # 篩選後的 loaded
+    chart_start_ts = pd.Timestamp(chart_start)
+    chart_end_ts = pd.Timestamp(chart_end)
+    loaded_filtered = [
+        (b, df[(df["date"] >= chart_start_ts) & (df["date"] <= chart_end_ts)].copy())
+        for b, df in loaded
+    ]
+
+    tab1, tab2, tab3 = st.tabs(["📊 標準化（不含息）", "📊 標準化（含息）", "💰 實際價格"])
+
+    with tab1:
+        st.info("📌 純價格走勢，**不含票息**。起始=100，僅反映債券市價漲跌。")
+        fig = go.Figure()
+        for b, df in loaded_filtered:
+            if df.empty: continue
+            norm = df["close"] / df["close"].iloc[0] * 100
+            fig.add_trace(go.Scatter(x=df["date"], y=norm, name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)))
+        fig.update_layout(yaxis_title="相對價格（起始=100，不含息）", hovermode="x unified", height=430,
+                          legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(fig, use_container_width=True)
+
+    with tab2:
+        st.info("📌 **含票息**的總報酬指數。起始=100，每日將票息（年票息率 ÷ 365）累積計入，完整反映持有人實際拿到的報酬。")
+        fig2 = go.Figure()
+        for b, df in loaded_filtered:
+            if df.empty: continue
+            tri = total_return_index(df, b["coupon"])
+            fig2.add_trace(go.Scatter(x=df["date"], y=tri, name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)))
+        fig2.update_layout(yaxis_title="總報酬指數（起始=100，含息）", hovermode="x unified", height=430,
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(fig2, use_container_width=True)
+
+    with tab3:
+        st.info("📌 TradingView 原始收盤價，面值100為基準，**不含票息**。")
+        fig3 = go.Figure()
+        for b, df in loaded_filtered:
+            if df.empty: continue
+            fig3.add_trace(go.Scatter(x=df["date"], y=df["close"], name=f'{b["label"]}. {b["name"]}',
+                line=dict(color=b["color"], width=2)))
+        fig3.update_layout(yaxis_title="價格（面值100）", hovermode="x unified", height=430,
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        st.plotly_chart(fig3, use_container_width=True)
+
+    # ==========================================
+    # 三、年度報酬表
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📅 年度報酬回顧")
+
+    all_annual = [(b, calc_annual(df, b["coupon"])) for b, df in loaded]
+    all_years = sorted(set(r["year"] for _, rows in all_annual for r in rows), reverse=True)
+
+    ann_html = '<table style="width:100%;border-collapse:collapse;font-size:0.84rem;border-radius:8px;overflow:hidden;">'
+    ann_html += '<thead><tr><th style="background:#1a2744;color:white;padding:8px 12px;text-align:left;">年度</th>'
+    for b, _ in all_annual:
+        short = b["name"][:12] + ("…" if len(b["name"]) > 12 else "")
+        ann_html += f'<th style="background:{b["color"]};color:white;padding:8px 12px;text-align:center;">{b["label"]}. {short}<br><small style="font-weight:400;">價格漲跌</small></th>'
+        ann_html += f'<th style="background:{b["color"]};color:white;padding:8px 12px;text-align:center;">票息收益</th>'
+        ann_html += f'<th style="background:{b["color"]};color:white;padding:8px 12px;text-align:center;">總報酬 ★</th>'
+    ann_html += "</tr></thead><tbody>"
+
+    for year in all_years:
+        ann_html += f'<tr><td style="padding:7px 12px;font-weight:700;color:#1a2744;border-bottom:1px solid #f0f0f0;">{year}</td>'
+        for b, rows in all_annual:
+            row = next((r for r in rows if r["year"] == year), None)
+            if row:
+                ann_html += f'<td style="padding:7px 12px;text-align:center;border-bottom:1px solid #f0f0f0;{color_cell(row["price"])}">{row["price"]:+.2%}</td>'
+                ann_html += f'<td style="padding:7px 12px;text-align:center;border-bottom:1px solid #f0f0f0;color:#2e7d32;">{row["coupon"]:+.2%}</td>'
+                ann_html += f'<td style="padding:7px 12px;text-align:center;border-bottom:1px solid #f0f0f0;{color_cell(row["total"])}font-weight:700;">{row["total"]:+.2%}</td>'
+            else:
+                ann_html += '<td colspan="3" style="text-align:center;color:#ccc;border-bottom:1px solid #f0f0f0;">無資料</td>'
+        ann_html += "</tr>"
+
+    ann_html += "</tbody></table>"
+    st.markdown(ann_html, unsafe_allow_html=True)
+
+    # ==========================================
+    # 四、生成 PDF 報告
+    # ==========================================
+    st.markdown("---")
+    st.subheader("📄 生成比較報告")
+    st.caption("點擊下方按鈕，生成包含債券基本資訊、績效比較、走勢圖、年度報酬的精美 PDF 報告")
+
+    report_lang = st.radio(
+        "報告語言版本",
+        ["中文版", "English"],
+        horizontal=True
+    )
+    lang_code = "zh" if report_lang == "中文版" else "en"
+
+    style_code = "fubon"
+
+    max_years = st.slider("年度報酬顯示幾年", min_value=1, max_value=10, value=5, step=1)
+
+    if st.button("🖨️ 生成 PDF 報告", type="primary", use_container_width=True):
+        with st.spinner("正在生成報告，請稍候..."):
+            try:
+                pdf_buf = generate_pdf_report(
+                    loaded=loaded,
+                    loaded_filtered=loaded_filtered,
+                    all_data=all_data,
+                    periods=periods,
+                    all_annual=all_annual,
+                    all_years=all_years,
+                    chart_start=str(chart_start),
+                    chart_end=str(chart_end),
+                    lang=lang_code,
+                    style=style_code,
+                    max_years=max_years
+                )
+                report_date = date.today().strftime("%Y%m%d")
+                bond_names = "_".join([b["label"] for b, _ in loaded])
+                suffix = "ZH" if lang_code == "zh" else "EN"
+                filename = f"Bond_Report_{bond_names}_{report_date}_{suffix}.pdf"
+                st.download_button(
+                    label="📥 下載 PDF 報告",
+                    data=pdf_buf,
+                    file_name=filename,
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+                st.success("✅ 報告生成完成！點擊上方按鈕下載。")
+            except Exception as e:
+                st.error(f"❌ 報告生成失敗：{e}")
+                st.info("💡 請確認 requirements.txt 已包含 reportlab 和 matplotlib")
+
+else:
+    st.info("👆 請在上方選擇至少一檔債券開始分析")
+    st.markdown("""
+    **如何新增債券資料？**
+    1. 在 TradingView 搜尋債券 ISIN（需 Plus 以上方案）
+    2. 開啟圖表，時間軸往左捲到最左邊
+    3. 右上角選單 → **匯出圖表資料...**
+    4. 上傳 CSV 到 Google 雲端硬碟的 `bond-data` 資料夾
+    5. 重新整理此頁面，下拉選單會自動更新！
+    """)
 
 # ==========================================
 # 現金流試算分頁
 # ==========================================
 
 # 基金/ELN 對照表
-FUND_DB = {
-    "AS07 PIMCO收益增長(美元後收)": {"name": "PIMCO收益增長(美元後收)", "annual_yield": 0.0900, "type": "FUND"},
-    "駿利亨德森平衡T6(美元後收)(穩月配)": {"name": "駿利亨德森平衡基金T6(美元)(穩月配)", "annual_yield": 0.0850, "type": "FUND"},
-    "AC18施羅德環球收息債券(美元)U-月配固定": {"name": "施羅德環球收息債券(美元)U-月配固定", "annual_yield": 0.0938, "type": "FUND"},
-    "AP05富達全球優質債(美元後收)": {"name": "富達全球優質債券基金(B股C月配息美元)", "annual_yield": 0.0849, "type": "FUND"},
-    "AP21富達存股優勢(美元後收)": {"name": "富達永續發展全球存股優勢基金(B股C月配息美元)", "annual_yield": 0.0819, "type": "FUND"},
-    "FA23群益潛力多重(美元後收)": {"name": "群益潛力收益多重NB(月配型-美元)", "annual_yield": 0.0700, "type": "FUND"},
-    "AG20安聯AI收益成長": {"name": "安聯AI收益成長基金-BMf9固定月配類股(美元)", "annual_yield": 0.0934, "type": "FUND"},
-    "AS01 PIMCO多元收益(美元後收)": {"name": "PIMCO多元收益(美元後收)", "annual_yield": 0.0850, "type": "FUND"},
-    "AU08貝萊德全球智慧數據股票入息(美元後收)": {"name": "貝萊德全球智慧數據股票入息基金B6美元", "annual_yield": 0.0743, "type": "FUND"},
-    "AU07貝萊德環資配(美元後收)": {"name": "貝萊德環球資產配置基金B10美元", "annual_yield": 0.0660, "type": "FUND"},
-    "AJ22鋒裕匯理基金歐元非投債-美元避險(後收)": {"name": "鋒裕匯理基金歐元非投資等級債券-美元避險", "annual_yield": 0.0791, "type": "FUND"},
-    "AJ23鋒裕匯理基金歐元非投債-歐元(後收)": {"name": "鋒裕匯理基金歐元非投資等級債券-歐元", "annual_yield": 0.0586, "type": "FUND"},
-    "AI10摩根歐洲策略-美元對沖(後收)": {"name": "摩根歐洲策略股息基金-美元對沖F股(每月派息)", "annual_yield": 0.0490, "type": "FUND"},
-    "AI20摩根多重(美元對沖)(美元後收)": {"name": "摩根多重穩定月配息美元對沖F股", "annual_yield": 0.1100, "type": "FUND"},
-    "AI25摩根環球非投資等級債券(美元對沖)(美元後收)": {"name": "摩根環球非投資等級債券(美元)-F股(穩定月配)", "annual_yield": 0.1100, "type": "FUND"},
-    "AF12富蘭克林穩月(美元後收)": {"name": "富蘭克林穩定月收益基金美元F(Mdis)股", "annual_yield": 0.0821, "type": "FUND"},
-    "AB15 聯博-新興市場多元(美元後收)": {"name": "聯博-新興市場多元收益基金ED月配級別美元", "annual_yield": 0.0551, "type": "FUND"},
-    "AB35聯博美成(總報酬月配)(美元後收)": {"name": "聯博-美國成長基金EP(總報酬月配)級別美元", "annual_yield": 0.1259, "type": "FUND"},
-    "AB37聯博優化波動(總報酬月配)(美元後收)": {"name": "聯博-優化波動股票基金EP(總報酬月配)級別美元", "annual_yield": 0.0885, "type": "FUND"},
-    "AB13聯博全球多元收益(美元後收)": {"name": "聯博-全球多元收益ED月配級別", "annual_yield": 0.0824, "type": "FUND"},
-    "AB03聯博美國收益(美元後收)": {"name": "聯博美國收益EA穩定月配", "annual_yield": 0.0781, "type": "FUND"},
-    "59DF 聯博房貸收益(前收)": {"name": "聯博房貸收益AA穩月配", "annual_yield": 0.0888, "type": "FUND"},
-    "AE02野村(愛爾蘭)美國非投資(美元後收)": {"name": "野村愛爾蘭美國非投資等級債券基金(BD美元類股)", "annual_yield": 0.1220, "type": "FUND"},
-    "AG08安聯美元短期非投債(美元後收)": {"name": "安聯美元短年期非投資等級債券-BMg", "annual_yield": 0.0843, "type": "FUND"},
-    "DT06富邦台美雙星(美元後收)": {"name": "富邦台美雙星多重NB月配", "annual_yield": 0.0904, "type": "FUND"},
-    "ELN（月配12%）": {"name": "ELN", "annual_yield": 0.1200, "type": "ELN"},
-}
-
-# 債券當期收益率對照表（票息/報價，每次更新Excel時更新）
-BOND_CURRENT_YIELD = {
-    "US88579YBD22": 0.0489, "US084664CQ25": 0.0484, "XS1807174559": 0.0520,
-    "US023135BJ40": 0.0476, "US375558BK80": 0.0483, "US037833CH12": 0.0472,
-    "US002824BH26": 0.0505, "XS1508675508": 0.0518, "US02209SAV51": 0.0498,
-    "US92343VCK89": 0.0520, "US594918BT09": 0.0442, "US125523CF53": 0.0522,
-    "US20030NBU46": 0.0469, "US375558BD48": 0.0508, "US02079KBN63": 0.0521,
-    "US30303M8X35": 0.0546, "US747525AK99": 0.0513, "US25468PDB94": 0.0468,
-    "US717081DK61": 0.0481, "US449276AF17": 0.0543, "US02209SAR40": 0.0550,
-    "US12572QAF28": 0.0513, "US037833AL42": 0.0442, "US084670BK32": 0.0460,
-    "US594918BZ68": 0.0412, "US717081EC37": 0.0415, "US035242AM81": 0.0465,
-    "US91159HJN17": 0.0543, "US55608KBG94": 0.0521, "US686330AR22": 0.0498,
-    "USG91139AL26": 0.0442, "US92556HAC16": 0.0741, "US31428XCA28": 0.0544,
-    "US09062XAG88": 0.0468, "US37045VAT70": 0.0595, "US854502AJ02": 0.0541,
-    "US00206RCU41": 0.0556, "US94974BGU89": 0.0534, "US172967KR13": 0.0531,
-    "US00206RCQ39": 0.0530, "US58013MFA71": 0.0517, "US42824CAY57": 0.0604,
-    "US09062XAD57": 0.0543, "US37045VAJ98": 0.0564, "US61747YDY86": 0.0492,
-    "US94974BGE48": 0.0525, "US172967HS33": 0.0546, "XS1049699926": 0.0559,
-    "US404280AQ21": 0.0530, "US37045VAF76": 0.0600, "US92553PAP71": 0.0638,
-    "US00206RBH49": 0.0492, "US71568QAB32": 0.0560, "US854502AA92": 0.0527,
-    "US50076QAN60": 0.0594, "XS2885079702": 0.0515, "US46625HHF01": 0.0557,
-    "US37045VAP58": 0.0524, "US126650CY46": 0.0495, "US38141GFD16": 0.0594,
-    "US00206RDR03": 0.0504, "US404280AG49": 0.0576, "US38143YAC75": 0.0582,
-    "US925524AX89": 0.0700, "US37045VAK61": 0.0598, "XS3151416727": 0.0533,
-    "US06051GLU12": 0.0545, "XS2852920342": 0.0556, "US458140CA64": 0.0423,
-    "US02079KBP12": 0.0565, "US30303MAE21": 0.0563, "US64110LBA35": 0.0540,
-    "US03769MAC01": 0.0580, "US191216DS69": 0.0530, "US92343VGW81": 0.0550,
-    "XS2747599509": 0.0575, "US29736RAU41": 0.0515, "US037833EW60": 0.0485,
-    "US91324PEW86": 0.0505, "US532457CG18": 0.0488, "US91324PES74": 0.0588,
-    "US459200KZ37": 0.0510, "US459200KV23": 0.0490, "US45866FAX24": 0.0495,
-    "US872898AJ06": 0.0450, "US084664DB47": 0.0385, "US92343VGP31": 0.0388,
-    "US828807DJ39": 0.0380, "US191216CQ13": 0.0420, "US254687FM36": 0.0275,
-    "XS1982116136": 0.0438, "US58933YAW57": 0.0400,
-    "US125523AK66": 0.0490, "US084664CQ25": 0.0484,
-}
-def get_bond_pay_months(isin):
-    info = LOCAL_DB.get(isin, {})
-    maturity_year = info.get("maturity", "")
-    # 從 main_isin_v2 取到期月份
-    BOND_MATURITY_MONTHS = {
-        "US88579YBD22": (9, 3), "US084664CQ25": (8, 2), "XS1807174559": (4, 10),
-        "US023135BJ40": (8, 2), "US375558BK80": (3, 9), "US037833CH12": (2, 8),
-        "US002824BH26": (11, 5), "XS1508675508": (10, 4), "US02209SAV51": (9, 3),
-        "US92343VCK89": (8, 2), "US594918BT09": (8, 2), "US125523CF53": (7, 1),
-        "US20030NBU46": (7, 1), "US375558BD48": (3, 9), "US02079KBN63": (2, 8),
-        "US30303M8X35": (11, 5), "US747525AK99": (5, 11), "US25468PDB94": (6, 12),
-        "US717081DK61": (5, 11), "US449276AF17": (2, 8), "US02209SAR40": (1, 7),
-        "US12572QAF28": (9, 3), "US037833AL42": (5, 11), "US084670BK32": (2, 8),
-        "US594918BZ68": (2, 8), "US717081EC37": (12, 6), "US035242AM81": (2, 8),
-        "US91159HJN17": (6, 12), "US55608KBG94": (11, 5), "US686330AR22": (9, 3),
-        "USG91139AL26": (7, 1), "US92556HAC16": (5, 11), "US31428XCA28": (5, 11),
-        "US09062XAG88": (5, 11), "US37045VAT70": (4, 10), "US854502AJ02": (11, 5),
-        "US00206RCU41": (2, 8), "US94974BGU89": (12, 6), "US172967KR13": (5, 11),
-        "US00206RCQ39": (5, 11), "US58013MFA71": (12, 6), "US42824CAY57": (10, 4),
-        "US09062XAD57": (9, 3), "US37045VAJ98": (4, 10), "US61747YDY86": (1, 7),
-        "US94974BGE48": (11, 5), "US172967HS33": (5, 11), "XS1049699926": (3, 9),
-        "US404280AQ21": (3, 9), "US37045VAF76": (10, 4), "US92553PAP71": (3, 9),
-        "US00206RBH49": (12, 6), "US71568QAB32": (10, 4), "US854502AA92": (9, 3),
-        "US50076QAN60": (2, 8), "XS2885079702": (9, 3), "US46625HHF01": (5, 11),
-        "US37045VAP58": (4, 10), "US126650CY46": (3, 9), "US38141GFD16": (10, 4),
-        "US00206RDR03": (3, 9), "US404280AG49": (5, 11), "US38143YAC75": (5, 11),
-        "US925524AX89": (4, 10), "US37045VAK61": (4, 10), "XS3151416727": (12, 6),
-        "US06051GLU12": (9, 3), "XS2852920342": (7, 1), "US458140CA64": (8, 2),
-        "US02079KBP12": (1, 7), "US30303MAE21": (11, 5), "US64110LBA35": (9, 3),
-        "US03769MAC01": (8, 2), "US191216DS69": (10, 4), "US92343VGW81": (3, 9),
-        "XS2747599509": (9, 3), "US29736RAU41": (9, 3), "US037833EW60": (2, 8),
-        "US91324PEW86": (10, 4), "US532457CG18": (2, 8), "US91324PES74": (10, 4),
-        "US459200KZ37": (2, 8), "US459200KV23": (9, 3), "US45866FAX24": (3, 9),
-        "US872898AJ06": (4, 10), "US084664DB47": (3, 9), "US92343VGP31": (8, 2),
-        "US828807DJ39": (7, 1), "US191216CQ13": (10, 4), "US254687FM36": (9, 3),
-        "XS1982116136": (3, 9), "US58933YAW57": (9, 3), "US125523AK66": (3, 9),
-        "XS1807174559": (4, 10),
-    }
-    return BOND_MATURITY_MONTHS.get(isin, (1, 7))
-
-with main_tab2:
-    st.markdown("### 💰 現金流試算工具")
-    st.markdown("混搭債券、基金、ELN，試算每月現金流與年化配息率")
-    st.markdown("---")
-
-    # 投資本金
-    principal = st.number_input(
-        "💵 投資總本金（元）",
-        min_value=100000,
-        max_value=1000000000,
-        value=10000000,
-        step=1000000,
-        format="%d"
-    )
-
-    # 選擇幾個標的
-    n_cf = st.radio("投資幾個標的？", [2, 3, 4, 5, 6], horizontal=True, key="cf_n")
-    st.markdown("---")
-
-    # 建立所有可選標的
-    bond_options = {
-        f"{v['issuer']}（{k}）": {
-            "isin": k, "type": "BOND", "name": v["issuer"],
-            "annual_yield": BOND_CURRENT_YIELD.get(k, v["coupon"]/100)
-        }
-        for k, v in LOCAL_DB.items()
-    }
-    fund_options = {f"【基金/ELN】{v['name']}": {"isin": k, "type": v["type"], "name": v["name"], "annual_yield": v["annual_yield"]} for k, v in FUND_DB.items()}
-    all_cf_options = dict(sorted({**bond_options, **fund_options}.items()))
-    all_cf_keys = ["（請選擇）"] + list(all_cf_options.keys())
-
-    # 配置各標的
-    cf_items = []
-    cols_cf = st.columns(n_cf)
-    remaining_pct = 100.0
-
-    for i in range(n_cf):
-        with cols_cf[i]:
-            color = COLORS[i % len(COLORS)]
-            label = LABELS[i]
-            st.markdown(f'<span class="bond-tag" style="background:{color}">標的 {label}</span>', unsafe_allow_html=True)
-
-            selected_cf = st.selectbox(
-                "選擇標的",
-                options=all_cf_keys,
-                key=f"cf_sel_{i}"
-            )
-
-            if selected_cf != "（請選擇）":
-                item = all_cf_options[selected_cf]
-
-                # 換了標的就自動更新收益率
-                if st.session_state.get(f"cf_last_sel_{i}") != selected_cf:
-                    st.session_state[f"cf_yield_{i}"] = round(item["annual_yield"] * 100, 2)
-                    st.session_state[f"cf_last_sel_{i}"] = selected_cf
-
-                default_pct = round(100.0 / n_cf, 1)
-                pct = st.number_input(
-                    "投資比例 %",
-                    min_value=0.0, max_value=100.0,
-                    value=default_pct, step=1.0,
-                    key=f"cf_pct_{i}", format="%.1f"
-                )
-                # 顯示當期收益率（可修改），換標的時自動更新
-                yield_pct = st.number_input(
-                    "當期年化收益率 %（可修改）",
-                    min_value=0.0, max_value=30.0,
-                    step=0.01,
-                    key=f"cf_yield_{i}", format="%.2f"
-                )
-                amt = principal * pct / 100
-                annual_income = amt * yield_pct / 100
-                monthly_income = annual_income / 12
-
-                st.markdown(f"**投資金額：** ${amt:,.0f}")
-                st.markdown(f"**預估年息：** ${annual_income:,.0f}")
-                st.markdown(f"**預估月息：** ${monthly_income:,.0f}")
-
-                cf_items.append({
-                    "label": label,
-                    "color": color,
-                    "name": item["name"],
-                    "type": item["type"],
-                    "isin": item["isin"],
-                    "pct": pct,
-                    "amount": amt,
-                    "yield_pct": yield_pct,
-                    "annual_income": annual_income,
-                    "monthly_income": monthly_income,
-                })
-
-    # 計算總覽
-    if cf_items:
-        st.markdown("---")
-        total_pct = sum(x["pct"] for x in cf_items)
-        total_income = sum(x["annual_income"] for x in cf_items)
-        avg_yield = total_income / principal * 100 if principal > 0 else 0
-
-        # 先算逐月現金流，KPI才能用
-        months = ["一月","二月","三月","四月","五月","六月",
-                  "七月","八月","九月","十月","十一月","十二月"]
-        monthly_total = [0.0] * 12
-        month_details = {m: [] for m in range(1, 13)}
-
-        for item in cf_items:
-            if item["type"] in ("FUND", "ELN"):
-                monthly_amt = item["annual_income"] / 12
-                for m in range(1, 13):
-                    monthly_total[m-1] += monthly_amt
-                    month_details[m].append((item["label"], item["name"][:12], monthly_amt))
-            else:
-                m1, m2 = get_bond_pay_months(item["isin"])
-                semi_amt = item["annual_income"] / 2
-                for m in [m1, m2]:
-                    monthly_total[m-1] += semi_amt
-                    month_details[m].append((item["label"], item["name"][:12], semi_amt))
-
-        max_m_idx = monthly_total.index(max(monthly_total))
-
-        # KPI 卡片
-        st.markdown(f"""
-        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
-            <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
-                <div style="font-size:0.8rem;color:#666;">💰 投資本金</div>
-                <div style="font-size:1.3rem;font-weight:700;color:#1a2744;">${principal:,.0f}</div>
-            </div>
-            <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
-                <div style="font-size:0.8rem;color:#666;">📊 資金配置</div>
-                <div style="font-size:1.3rem;font-weight:700;color:{'#2e7d32' if abs(total_pct-100)<0.1 else '#c62828'};">{total_pct:.1f}%</div>
-                <div style="font-size:0.75rem;color:#888;">{'✅ 已滿' if abs(total_pct-100)<0.1 else f'⚠️ 還差{100-total_pct:.1f}%'}</div>
-            </div>
-            <div style="flex:1;min-width:150px;background:#fff9e6;border:2px solid #c8a84b;border-radius:10px;padding:16px;text-align:center;">
-                <div style="font-size:0.8rem;color:#666;">📈 年化配息率</div>
-                <div style="font-size:1.6rem;font-weight:700;color:#b8860b;">{avg_yield:.2f}%</div>
-            </div>
-            <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
-                <div style="font-size:0.8rem;color:#666;">🎯 預估年領總息</div>
-                <div style="font-size:1.3rem;font-weight:700;color:#1a2744;">${total_income:,.0f}</div>
-            </div>
-            <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
-                <div style="font-size:0.8rem;color:#666;">📅 預估月均領息</div>
-                <div style="font-size:1.3rem;font-weight:700;color:#1a2744;">${total_income/12:,.0f}</div>
-            </div>
-            <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
-                <div style="font-size:0.8rem;color:#666;">🗓️ 最高領息月份</div>
-                <div style="font-size:1.1rem;font-weight:700;color:#1565c0;">{months[max_m_idx]}</div>
-                <div style="font-size:0.85rem;color:#1565c0;">${monthly_total[max_m_idx]:,.0f}</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # 現金流表格
-        # ── 逐月現金流明細 ──────────────────────
-        st.markdown("---")
-        st.subheader("📅 逐月現金流明細")
-
-        cf_html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;border-radius:8px;overflow:hidden;">'
-        cf_html += '<thead><tr>'
-        cf_html += '<th style="background:#1a2744;color:white;padding:8px 12px;text-align:left;">月份</th>'
-        for item in cf_items:
-            cf_html += f'<th style="background:{item["color"]};color:white;padding:8px 12px;text-align:center;">{item["label"]}. {item["name"][:8]}</th>'
-        cf_html += '<th style="background:#c8a84b;color:white;padding:8px 12px;text-align:center;">當月合計</th>'
-        cf_html += '</tr></thead><tbody>'
-
-        for m_idx, month_name in enumerate(months):
-            m = m_idx + 1
-            bg = "#f0f4ff" if m_idx % 2 == 0 else "white"
-            cf_html += f'<tr style="background:{bg};">'
-            cf_html += f'<td style="padding:7px 12px;font-weight:700;color:#1a2744;">{month_name}</td>'
-            for item in cf_items:
-                if item["type"] in ("FUND", "ELN"):
-                    val = item["annual_income"] / 12
-                    cf_html += f'<td style="padding:7px 12px;text-align:right;">${val:,.0f}</td>'
-                else:
-                    m1, m2 = get_bond_pay_months(item["isin"])
-                    if m in [m1, m2]:
-                        val = item["annual_income"] / 2
-                        cf_html += f'<td style="padding:7px 12px;text-align:right;font-weight:600;color:#1565c0;">${val:,.0f}</td>'
-                    else:
-                        cf_html += '<td style="padding:7px 12px;text-align:center;color:#ccc;">—</td>'
-            total_m = monthly_total[m_idx]
-            cf_html += f'<td style="padding:7px 12px;text-align:right;font-weight:700;color:#c8a84b;">${total_m:,.0f}</td>'
-            cf_html += '</tr>'
-
-        # 合計列
-        cf_html += '<tr style="background:#1a2744;">'
-        cf_html += '<td style="padding:8px 12px;color:#ffd700;font-weight:700;">全年合計</td>'
-        for item in cf_items:
-            cf_html += f'<td style="padding:8px 12px;text-align:right;color:white;font-weight:700;">${item["annual_income"]:,.0f}</td>'
-        cf_html += f'<td style="padding:8px 12px;text-align:right;color:#ffd700;font-weight:700;">${total_income:,.0f}</td>'
-        cf_html += '</tr></tbody></table>'
-        st.markdown(cf_html, unsafe_allow_html=True)
-
-        # ── 走勢圖 ──────────────────────
-        st.markdown("---")
-        st.subheader("📊 月現金流圖表")
-        fig_cf = go.Figure()
-        fig_cf.add_trace(go.Bar(
-            x=months,
-            y=monthly_total,
-            marker_color=[COLORS[i % len(COLORS)] for i in range(12)],
-            text=[f"${v:,.0f}" for v in monthly_total],
-            textposition="outside",
-            name="當月合計"
-        ))
-        fig_cf.update_layout(
-            yaxis_title="配息金額（元）",
-            height=380,
-            plot_bgcolor="#f8f9ff",
-            paper_bgcolor="white",
-            showlegend=False,
-            margin=dict(t=20, b=40)
-        )
-        st.plotly_chart(fig_cf, use_container_width=True)
-
-        # ── 各標的佔比 ──────────────────────
-        st.subheader("🥧 投資組合配置")
-        pie_col1, pie_col2 = st.columns(2)
-        with pie_col1:
-            fig_pie = go.Figure(go.Pie(
-                labels=[f"{x['label']}. {x['name'][:10]}" for x in cf_items],
-                values=[x["amount"] for x in cf_items],
-                marker_colors=[x["color"] for x in cf_items],
-                hole=0.4
-            ))
-            fig_pie.update_layout(title="資金分配比例", height=300, margin=dict(t=40,b=0))
-            st.plotly_chart(fig_pie, use_container_width=True)
-        with pie_col2:
-            fig_pie2 = go.Figure(go.Pie(
-                labels=[f"{x['label']}. {x['name'][:10]}" for x in cf_items],
-                values=[x["annual_income"] for x in cf_items],
-                marker_colors=[x["color"] for x in cf_items],
-                hole=0.4
-            ))
-            fig_pie2.update_layout(title="年息貢獻比例", height=300, margin=dict(t=40,b=0))
-            st.plotly_chart(fig_pie2, use_container_width=True)
-
-        st.warning("⚠️ 以上試算均為估計值，配息金額以各機構實際公告為準。僅供內部教育訓練使用，請勿外流。")
 
 st.markdown("---")
 st.warning("⚠️ **免責聲明**：本工具所顯示之價格資料來源為 TradingView，僅供參考，並非本行實際報價。實際申購價格以本行公告為準，投資人應自行評估風險。本工具**僅供內部教育訓練使用，請勿外流**。")
-st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 此價格僅為 TradingView 中間價，並非銀行報價 ｜ 僅供參考，不構成投資建議")
+st.caption("資料來源：TradingView ｜ 總報酬 = 價格漲跌 + 票息（依實際持有天數）｜ 僅供參考，不構成投資建議")
