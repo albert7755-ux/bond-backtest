@@ -139,15 +139,28 @@ def list_sheets_in_folder(folder_id):
 
 @st.cache_data(ttl=300)
 def read_sheet(sheet_id):
-    """讀取試算表資料"""
+    """讀取試算表資料，遇到503自動重試"""
+    import time
     client = get_gspread_client()
-    sh = client.open_by_key(sheet_id)
-    ws = sh.get_worksheet(0)
-    data = ws.get_all_records()
-    df = pd.DataFrame(data)
-    df["date"] = pd.to_datetime(df["time"], unit="s")
-    df = df[["date", "close"]].sort_values("date").reset_index(drop=True)
-    return df
+    for attempt in range(3):  # 最多重試3次
+        try:
+            sh = client.open_by_key(sheet_id)
+            ws = sh.get_worksheet(0)
+            data = ws.get_all_records()
+            df = pd.DataFrame(data)
+            if "time" in df.columns:
+                df["date"] = pd.to_datetime(df["time"], unit="s")
+            elif "date" in df.columns:
+                df["date"] = pd.to_datetime(df["date"])
+            else:
+                df["date"] = pd.to_datetime(df.iloc[:, 0])
+            df = df[["date", "close"]].sort_values("date").reset_index(drop=True)
+            return df
+        except Exception as e:
+            if "503" in str(e) and attempt < 2:
+                time.sleep(3)  # 等3秒後重試
+                continue
+            raise e
 
 def parse_filename(name):
     """從檔名解析 ISIN（支援 SWB、LUXSE、FINRA、FINRA_DLY 格式）"""
