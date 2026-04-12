@@ -5,3 +5,5 @@ streamlit
 gspread
 google-auth
 requests
+reportlab
+kaleido
