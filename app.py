@@ -407,7 +407,7 @@ def get_chinese_font():
 
     return "Helvetica"  # 備用英文字體
 
-def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, all_years, chart_start, chart_end, lang="zh"):
+def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, all_years, chart_start, chart_end, lang="zh", style="fubon"):
     """生成債券績效比較 PDF 報告"""
     import io, os, tempfile
     from datetime import date
@@ -456,18 +456,42 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     # 取得中文字體
     font_name = get_chinese_font()
 
-    # 顏色定義
-    NAVY    = colors.HexColor("#1a2744")
-    GOLD    = colors.HexColor("#c8a84b")
-    GREEN   = colors.HexColor("#2e7d32")
-    RED     = colors.HexColor("#c62828")
-    LIGHT   = colors.HexColor("#f0f4ff")
-    WHITE   = colors.white
-    GRAY    = colors.HexColor("#888888")
-    BG_GRAY = colors.HexColor("#f8f9fa")
+    # 根據風格設定顏色
+    if style == "fubon":
+        NAVY    = colors.HexColor("#1a2744")
+        GOLD    = colors.HexColor("#c8a84b")
+        WHITE   = colors.white
+        GRAY    = colors.HexColor("#888888")
+        BG_GRAY = colors.HexColor("#f0f4ff")
+        bond_colors_hex = ["#1565c0","#c62828","#2e7d32","#6a1b9a","#e65100","#00838f"]
+        header_bg = NAVY
+        accent = GOLD
+        title_bg = NAVY
+        row_colors = [colors.HexColor("#f0f4ff"), colors.white]
+    elif style == "simple":
+        NAVY    = colors.HexColor("#222222")
+        GOLD    = colors.HexColor("#555555")
+        WHITE   = colors.white
+        GRAY    = colors.HexColor("#999999")
+        BG_GRAY = colors.HexColor("#f5f5f5")
+        bond_colors_hex = ["#222222","#555555","#888888","#aaaaaa","#cccccc","#dddddd"]
+        header_bg = colors.HexColor("#333333")
+        accent = colors.HexColor("#888888")
+        title_bg = colors.HexColor("#222222")
+        row_colors = [colors.HexColor("#f5f5f5"), colors.white]
+    else:  # colorful
+        NAVY    = colors.HexColor("#2c3e50")
+        GOLD    = colors.HexColor("#f39c12")
+        WHITE   = colors.white
+        GRAY    = colors.HexColor("#7f8c8d")
+        BG_GRAY = colors.HexColor("#eaf6ff")
+        bond_colors_hex = ["#3498db","#e74c3c","#2ecc71","#9b59b6","#f39c12","#1abc9c"]
+        header_bg = colors.HexColor("#2c3e50")
+        accent = colors.HexColor("#f39c12")
+        title_bg = colors.HexColor("#3498db")
+        row_colors = [colors.HexColor("#eaf6ff"), colors.white]
 
-    bond_colors_hex = ["#1565c0","#c62828","#2e7d32","#6a1b9a","#e65100","#00838f"]
-    bond_colors_rl  = [colors.HexColor(h) for h in bond_colors_hex]
+    bond_colors_rl = [colors.HexColor(h) for h in bond_colors_hex]
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("title", fontName=font_name, fontSize=22,
@@ -582,28 +606,39 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
 
     try:
-        fig_pdf = go.Figure()
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as mticker
+
+        fig, ax = plt.subplots(figsize=(10, 4.5))
+        fig.patch.set_facecolor("#f8f9ff" if style != "simple" else "#f5f5f5")
+        ax.set_facecolor("#f8f9ff" if style != "simple" else "#f5f5f5")
+
         for idx, (b, df) in enumerate(loaded_filtered):
             if df.empty: continue
             tri = total_return_index(df, b["coupon"])
-            fig_pdf.add_trace(go.Scatter(
-                x=df["date"], y=tri,
-                name=f'{b["label"]}. {b["name"]}',
-                line=dict(color=bond_colors_hex[idx], width=2.5)
-            ))
-        fig_pdf.update_layout(
-            yaxis_title=L["y_axis"],
-            hovermode="x unified", height=380, width=650,
-            margin=dict(l=40, r=20, t=20, b=40),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            paper_bgcolor="white", plot_bgcolor="#f8f9ff"
-        )
-        img_bytes = fig_pdf.to_image(format="png", scale=2)
-        img_buf = io.BytesIO(img_bytes)
-        rl_img = RLImage(img_buf, width=15*cm, height=8.5*cm)
+            ax.plot(df["date"], tri,
+                    label=f'{b["label"]}. {b["name"]}',
+                    color=bond_colors_hex[idx % len(bond_colors_hex)],
+                    linewidth=2)
+
+        ax.set_ylabel(L["y_axis"], fontsize=9)
+        ax.yaxis.set_major_formatter(mticker.FormatStrFormatter('%.1f'))
+        ax.legend(loc="upper left", fontsize=8, framealpha=0.8)
+        ax.grid(True, alpha=0.3, linestyle="--")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        plt.tight_layout()
+
+        img_buf = io.BytesIO()
+        plt.savefig(img_buf, format="png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        img_buf.seek(0)
+        rl_img = RLImage(img_buf, width=15*cm, height=7*cm)
         story.append(rl_img)
     except Exception as e:
-        story.append(Paragraph(f"Chart unavailable (kaleido required): {e}", small_style))
+        story.append(Paragraph(f"Chart unavailable: {e}", small_style))
 
     story.append(Spacer(1, 0.4*cm))
 
@@ -993,6 +1028,13 @@ if loaded:
     )
     lang_code = "zh" if report_lang == "中文版" else "en"
 
+    report_style = st.radio(
+        "報告風格",
+        ["🏦 富邦風格（深藍金色）", "📋 簡約專業（黑白灰）", "🎨 彩色活潑"],
+        horizontal=True
+    )
+    style_code = "fubon" if "富邦" in report_style else ("simple" if "簡約" in report_style else "colorful")
+
     if st.button("🖨️ 生成 PDF 報告", type="primary", use_container_width=True):
         with st.spinner("正在生成報告，請稍候..."):
             try:
@@ -1005,7 +1047,8 @@ if loaded:
                     all_years=all_years,
                     chart_start=str(chart_start),
                     chart_end=str(chart_end),
-                    lang=lang_code
+                    lang=lang_code,
+                    style=style_code
                 )
                 report_date = date.today().strftime("%Y%m%d")
                 bond_names = "_".join([b["label"] for b, _ in loaded])
@@ -1021,7 +1064,7 @@ if loaded:
                 st.success("✅ 報告生成完成！點擊上方按鈕下載。")
             except Exception as e:
                 st.error(f"❌ 報告生成失敗：{e}")
-                st.info("💡 請確認 requirements.txt 已包含 reportlab 和 kaleido")
+                st.info("💡 請確認 requirements.txt 已包含 reportlab 和 matplotlib")
 
 else:
     st.info("👆 請在上方選擇至少一檔債券開始分析")
