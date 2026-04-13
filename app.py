@@ -943,7 +943,7 @@ if loaded:
     date_col1, date_col2 = st.columns(2)
     with date_col1:
         chart_start = st.date_input(
-            "📅 圖表起始日",
+            "圖表起始日",
             value=default_start,
             min_value=all_min_date,
             max_value=all_max_date,
@@ -951,7 +951,7 @@ if loaded:
         )
     with date_col2:
         chart_end = st.date_input(
-            "📅 圖表結束日",
+            "圖表結束日",
             value=all_max_date,
             min_value=all_min_date,
             max_value=all_max_date,
