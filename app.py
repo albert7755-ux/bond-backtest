@@ -211,7 +211,7 @@ def parse_filename(name):
 
     return ""
 
-MASTER_SHEET_ID = "1Kg-WBX1hGrS3vkLzbncDluLe3cWRj1vkwnzAPavDVkc"
+MASTER_SHEET_ID = "1PVXcY12Dly5l0HlOyOAKdRzegt4K6gAAQFj1YnhiHqw"
 
 LOCAL_DB = {
     "US02079KBP12": {"issuer": "Alphabet 公司債6", "coupon": 5.65, "maturity": "2056"},
@@ -776,9 +776,10 @@ try:
         # 處理欄位全擠在一起的情況
         keys = list(row.keys())
         if len(keys) == 1 and ',' in keys[0]:
-            # CSV格式擠在一個欄位，手動解析
-            col_names = [c.strip() for c in keys[0].split(',')]
-            values    = [v.strip() for v in str(list(row.values())[0]).split(',')]
+            import csv as _csv, io as _io
+            col_names = [c.strip() for c in next(_csv.reader([keys[0]]))]
+            values    = list(next(_csv.reader([str(list(row.values())[0])])))
+            values    = [v.strip() for v in values]
             row = dict(zip(col_names, values))
 
         filename  = str(row.get("檔名", "")).strip()
