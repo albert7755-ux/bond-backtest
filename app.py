@@ -736,46 +736,70 @@ st.markdown("---")
 
 # 主分頁
 
-st.markdown("從 Google Drive `bond-data` 資料夾自動讀取，選擇債券後立即比較績效")
+st.markdown("從 bond_master 主資料表讀取清單，選擇債券後比較績效")
 
-# 讀取資料夾中的試算表清單
 folder_id = st.secrets.get("FOLDER_ID", "")
 
 try:
-    with st.spinner("正在讀取 bond-data 資料夾..."):
-        files = list_sheets_in_folder(folder_id)
+    # 1. 從 bond_master 讀取選單清單
+    with st.spinner("正在讀取 bond_master 主資料表..."):
+        creds_info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+        creds = Credentials.from_service_account_info(
+            creds_info,
+            scopes=["https://www.googleapis.com/auth/spreadsheets",
+                    "https://www.googleapis.com/auth/drive.readonly"]
+        )
+        gc = gspread.authorize(creds)
+        master_sh = gc.open_by_key(MASTER_SHEET_ID)
+        master_ws = master_sh.get_worksheet(0)
+        master_rows = master_ws.get_all_records()
 
-    if not files:
-        st.warning("⚠️ bond-data 資料夾中沒有試算表，請先上傳 CSV 並確認已轉換為 Google 試算表格式。")
+    if not master_rows:
+        st.warning("⚠️ bond_master 試算表是空的，請先填入債券資料。")
         st.stop()
 
-    # 建立選單選項：顯示「債券名稱（ISIN）」格式
+    # 2. 從 bond-data 資料夾取得所有試算表 ID（用來讀價格）
+    with st.spinner("正在讀取 bond-data 資料夾..."):
+        files = list_sheets_in_folder(folder_id)
     file_options = {f["name"]: f["id"] for f in files}
-    file_names = list(file_options.keys())
 
-    # 預載所有 ISIN 資訊
-    all_isins = [parse_filename(name) for name in file_names]
-    all_isins_clean = [isin for isin in all_isins if isin]
-    if all_isins_clean:
-        bond_info_cache = batch_lookup_bond_info(tuple(all_isins_clean))
-    else:
-        bond_info_cache = {}
+    # 3. 建立選單：顯示名稱 → sheet_id
+    bond_info_cache = {}
+    display_to_sheet = {}
+    display_to_isin  = {}
 
-    # 建立「顯示名稱 → 原始檔名」對照，並按名稱排序
-    def make_display_name(file_name):
-        isin = parse_filename(file_name)
-        if isin and isin in bond_info_cache:
-            info = bond_info_cache[isin]
-            issuer = info["issuer"]
-            coupon = info["coupon"]
-            maturity = info["maturity"]
-            if issuer and issuer != isin:
-                return f"{issuer}（{isin}）"
-        return file_name
+    for row in master_rows:
+        filename   = str(row.get("檔名", "")).strip()
+        isin       = str(row.get("ISIN/代碼", "")).strip()
+        bond_name  = str(row.get("債券名稱", "")).strip()
+        if not filename or not bond_name:
+            continue
+        sheet_id = None
+        for fname, fid in file_options.items():
+            clean_filename = filename.replace(", 1D", "").strip()
+            if clean_filename in fname or fname.startswith(clean_filename):
+                sheet_id = fid
+                break
+        if not sheet_id:
+            continue
+        db_info  = load_master_db().get(isin, {})
+        coupon   = db_info.get("coupon", 0.0)
+        maturity = db_info.get("maturity", "")
+        bond_info_cache[isin] = {"issuer": bond_name, "coupon": coupon, "maturity": maturity}
+        display_name = f"{bond_name}（{isin}）" if isin else bond_name
+        display_to_sheet[display_name] = sheet_id
+        display_to_isin[display_name]  = isin
 
-    display_to_file = {make_display_name(f): f for f in file_names}
-    # 按顯示名稱排序
-    display_names = sorted(display_to_file.keys())
+    display_names = sorted(display_to_sheet.keys())
+
+    if not display_names:
+        st.warning("⚠️ bond_master 的債券都找不到對應的 bond-data 試算表。")
+        st.stop()
+
+except Exception as e:
+    st.error(f"❌ 無法連接 Google Drive：{e}")
+    st.stop()
+
 
 except Exception as e:
     st.error(f"❌ 無法連接 Google Drive：{e}")
@@ -799,29 +823,23 @@ for i in range(n):
             options=["（請選擇）"] + display_names,
             key=f"sel_{i}"
         )
-        selected = display_to_file.get(selected_display, "") if selected_display != "（請選擇）" else ""
+        sheet_id = display_to_sheet.get(selected_display) if selected_display != "（請選擇）" else None
+        isin = display_to_isin.get(selected_display, "") if selected_display != "（請選擇）" else ""
 
         # 從預載快取取債券資訊
-        if selected:
-            isin = parse_filename(selected)
-            if isin and isin in bond_info_cache:
-                info = bond_info_cache[isin]
-                issuer = info["issuer"]
-                auto_coupon = info["coupon"]
-                maturity = info["maturity"]
-                default_name = f"{issuer} {auto_coupon}% {maturity}".strip() if issuer != isin else selected
-                default_coupon = auto_coupon
-                if st.session_state.get(f"last_sel_{i}") != selected_display:
-                    st.session_state[f"name_{i}"] = default_name
-                    st.session_state[f"coupon_{i}"] = default_coupon
-                    st.session_state[f"last_sel_{i}"] = selected_display
-                if auto_coupon > 0:
-                    st.success(f"✅ {isin}｜票息 {auto_coupon}%｜到期 {maturity}")
-            else:
-                if st.session_state.get(f"last_sel_{i}") != selected_display:
-                    st.session_state[f"name_{i}"] = selected
-                    st.session_state[f"coupon_{i}"] = 0.0
-                    st.session_state[f"last_sel_{i}"] = selected_display
+        if sheet_id and isin and isin in bond_info_cache:
+            info = bond_info_cache[isin]
+            issuer = info["issuer"]
+            auto_coupon = info["coupon"]
+            maturity = info["maturity"]
+            default_name = f"{issuer} {auto_coupon}% {maturity}".strip()
+            default_coupon = auto_coupon
+            if st.session_state.get(f"last_sel_{i}") != selected_display:
+                st.session_state[f"name_{i}"] = default_name
+                st.session_state[f"coupon_{i}"] = default_coupon
+                st.session_state[f"last_sel_{i}"] = selected_display
+            if auto_coupon > 0:
+                st.success(f"✅ {isin}｜票息 {auto_coupon}%｜到期 {maturity}")
         else:
             if st.session_state.get(f"last_sel_{i}") != selected_display:
                 st.session_state[f"name_{i}"] = ""
@@ -830,15 +848,14 @@ for i in range(n):
 
         name = st.text_input("債券名稱（可修改）", placeholder="例：Apple 3% 2027", key=f"name_{i}")
         coupon = st.number_input("票息率 % （可修改）", step=0.01, min_value=0.0, max_value=20.0, key=f"coupon_{i}")
-    
-        sheet_id = file_options.get(selected) if selected else None
+
         bonds.append({
             "sheet_id": sheet_id,
             "name": name or f"債券{label}",
             "coupon": coupon,
             "color": color,
             "label": label,
-            "selected": selected
+            "selected": selected_display
         })
 
 st.markdown("---")
