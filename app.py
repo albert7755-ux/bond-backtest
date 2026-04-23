@@ -773,9 +773,10 @@ try:
     display_to_isin  = {}
 
     for row in master_rows:
-        filename   = str(row.get("檔名", "")).strip()
-        isin       = str(row.get("ISIN/代碼", "")).strip()
-        bond_name  = str(row.get("債券名稱", "")).strip()
+        # 用欄位名稱讀取，同時嘗試去除空白
+        filename  = str(row.get("檔名", "") or row.get("檔名 ", "") or row.get(" 檔名", "")).strip()
+        isin      = str(row.get("ISIN/代碼", "") or row.get("ISIN/代碼 ", "")).strip()
+        bond_name = str(row.get("債券名稱", "") or row.get("債券名稱 ", "")).strip()
         if not filename or not bond_name:
             continue
         sheet_id = None
@@ -806,7 +807,8 @@ try:
             st.write("前5個檔名：", list(file_options.keys())[:5])
             st.write(f"bond_master 共 {len(master_rows)} 行")
             if master_rows:
-                st.write("第1行檔名：", master_rows[0].get("檔名", ""))
+                st.write("第1行的所有欄位key：", list(master_rows[0].keys()))
+                st.write("第1行內容：", master_rows[0])
         st.stop()
 
 except Exception as e:
