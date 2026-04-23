@@ -211,6 +211,8 @@ def parse_filename(name):
 
     return ""
 
+MASTER_SHEET_ID = "1Kg-WBX1hGrS3vkLzbncDluLe3cWRj1vkwnzAPavDVkc"
+
 LOCAL_DB = {
     "US02079KBP12": {"issuer": "Alphabet 公司債6", "coupon": 5.65, "maturity": "2056"},
     "US30303MAE21": {"issuer": "Meta平台公司債9", "coupon": 5.625, "maturity": "2055"},
@@ -308,13 +310,44 @@ LOCAL_DB = {
     "US458140CA64": {"issuer": "英特爾公司債5", "coupon": 4.15, "maturity": "2032"},
 }
 
+@st.cache_data(ttl=3600)
+def load_master_db():
+    """從 Google Sheets bond_master 讀取完整債券對照表，失敗則用LOCAL_DB"""
+    try:
+        creds_info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+        creds = Credentials.from_service_account_info(
+            creds_info,
+            scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
+        )
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        ws = sh.get_worksheet(0)
+        rows = ws.get_all_records()
+        db = dict(LOCAL_DB)  # 從LOCAL_DB開始，讓GS的資料覆蓋/新增
+        for row in rows:
+            code = str(row.get("ISIN/代碼", "")).strip()
+            name = str(row.get("債券名稱", "")).strip()
+            if not code or not name:
+                continue
+            existing = db.get(code, {})
+            db[code] = {
+                "issuer":   name,
+                "coupon":   existing.get("coupon", 0.0),
+                "maturity": existing.get("maturity", ""),
+            }
+        return db
+    except Exception:
+        return LOCAL_DB
+
 def batch_lookup_bond_info(isin_list):
-    """從本地對照表查詢（94檔完整資料）"""
-    return {isin: LOCAL_DB.get(isin, {"issuer": isin, "coupon": 0.0, "maturity": ""}) for isin in isin_list}
+    """從對照表查詢（優先Google Sheets，失敗則LOCAL_DB）"""
+    db = load_master_db()
+    return {isin: db.get(isin, {"issuer": isin, "coupon": 0.0, "maturity": ""}) for isin in isin_list}
 
 def lookup_bond_info(isin):
     """單一 ISIN 查詢"""
-    return LOCAL_DB.get(isin, {"issuer": isin, "coupon": 0.0, "maturity": ""})
+    db = load_master_db()
+    return db.get(isin, {"issuer": isin, "coupon": 0.0, "maturity": ""})
 
 
 # ==========================================
