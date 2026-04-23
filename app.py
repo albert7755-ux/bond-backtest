@@ -773,10 +773,17 @@ try:
     display_to_isin  = {}
 
     for row in master_rows:
-        # 用欄位名稱讀取，同時嘗試去除空白
-        filename  = str(row.get("檔名", "") or row.get("檔名 ", "") or row.get(" 檔名", "")).strip()
-        isin      = str(row.get("ISIN/代碼", "") or row.get("ISIN/代碼 ", "")).strip()
-        bond_name = str(row.get("債券名稱", "") or row.get("債券名稱 ", "")).strip()
+        # 處理欄位全擠在一起的情況
+        keys = list(row.keys())
+        if len(keys) == 1 and ',' in keys[0]:
+            # CSV格式擠在一個欄位，手動解析
+            col_names = [c.strip() for c in keys[0].split(',')]
+            values    = [v.strip() for v in str(list(row.values())[0]).split(',')]
+            row = dict(zip(col_names, values))
+
+        filename  = str(row.get("檔名", "")).strip()
+        isin      = str(row.get("ISIN/代碼", "")).strip()
+        bond_name = str(row.get("債券名稱", "")).strip()
         if not filename or not bond_name:
             continue
         sheet_id = None
