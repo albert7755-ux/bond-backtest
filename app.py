@@ -761,7 +761,7 @@ try:
     # 2. 從 bond-data 資料夾取得所有試算表 ID（用來讀價格）
     with st.spinner("正在讀取 bond-data 資料夾..."):
         files = list_sheets_in_folder(folder_id)
-    file_options = {f["name"]: f["id"] for f in files}
+    file_options = {f["name"]: f["id"] for f in files if "bond_master" not in f["name"].lower()}
 
     if not file_options:
         st.error(f"❌ bond-data 資料夾是空的！FOLDER_ID={folder_id}")
