@@ -763,6 +763,10 @@ try:
         files = list_sheets_in_folder(folder_id)
     file_options = {f["name"]: f["id"] for f in files}
 
+    if not file_options:
+        st.error(f"❌ bond-data 資料夾是空的！FOLDER_ID={folder_id}")
+        st.stop()
+
     # 3. 建立選單：顯示名稱 → sheet_id
     bond_info_cache = {}
     display_to_sheet = {}
@@ -776,8 +780,10 @@ try:
             continue
         sheet_id = None
         for fname, fid in file_options.items():
-            clean_filename = filename.replace(", 1D", "").strip()
-            if clean_filename in fname or fname.startswith(clean_filename):
+            # 清理兩邊的名稱再比對
+            clean_master = filename.replace(", 1D", "").replace(",1D", "").strip()
+            clean_fname  = fname.replace(", 1D", "").replace(",1D", "").replace(".csv", "").strip()
+            if clean_master == clean_fname or clean_master in clean_fname or clean_fname in clean_master:
                 sheet_id = fid
                 break
         if not sheet_id:
@@ -793,7 +799,14 @@ try:
     display_names = sorted(display_to_sheet.keys())
 
     if not display_names:
+        # 顯示debug資訊
         st.warning("⚠️ bond_master 的債券都找不到對應的 bond-data 試算表。")
+        with st.expander("🔍 Debug 資訊"):
+            st.write(f"bond-data 資料夾共 {len(file_options)} 個試算表")
+            st.write("前5個檔名：", list(file_options.keys())[:5])
+            st.write(f"bond_master 共 {len(master_rows)} 行")
+            if master_rows:
+                st.write("第1行檔名：", master_rows[0].get("檔名", ""))
         st.stop()
 
 except Exception as e:
