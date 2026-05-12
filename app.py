@@ -112,21 +112,16 @@ def get_gspread_client():
 @st.cache_data(ttl=300)
 def list_sheets_in_folder(folder_id):
     """列出資料夾中所有試算表"""
-    client = get_gspread_client()
-    drive = client.auth.authorized_session if hasattr(client, 'auth') else None
-    
-    # 用 gspread 列出資料夾中的檔案
     import requests
     from google.oauth2.service_account import Credentials
-    
+
     creds_dict = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
     scopes = ["https://www.googleapis.com/auth/drive.readonly"]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-    
-    # 手動呼叫 Drive API
+
     from google.auth.transport.requests import Request
     creds.refresh(Request())
-    
+
     headers = {"Authorization": f"Bearer {creds.token}"}
     url = f"https://www.googleapis.com/drive/v3/files"
     params = {
@@ -135,14 +130,14 @@ def list_sheets_in_folder(folder_id):
     }
     resp = requests.get(url, headers=headers, params=params)
     files = resp.json().get("files", [])
-    return files  # [{"id": "...", "name": "..."}]
+    return files
 
 @st.cache_data(ttl=300)
 def read_sheet(sheet_id):
     """讀取試算表資料，遇到503自動重試"""
     import time
     client = get_gspread_client()
-    for attempt in range(3):  # 最多重試3次
+    for attempt in range(3):
         try:
             sh = client.open_by_key(sheet_id)
             ws = sh.get_worksheet(0)
@@ -158,53 +153,50 @@ def read_sheet(sheet_id):
             return df
         except Exception as e:
             if "503" in str(e) and attempt < 2:
-                time.sleep(3)  # 等3秒後重試
+                time.sleep(3)
                 continue
             raise e
 
 def parse_filename(name):
-    """從檔名解析 ISIN（支援 SWB、LUXSE、FINRA、FINRA_DLY 格式）"""
+    """從檔名解析 ISIN"""
     import re
 
-    # FINRA 格式對照表（ticker → ISIN）
     FINRA_DB = {
-        "FINRA_DLY_APO5813716":    "US03769MAC01",  # 阿波羅全球
-        "FINRA_DLY_BIIB4981508":   "US09062XAG88",  # 生物基因
-        "FINRA_DLY_BRK3963113":    "US084670BK32",  # 波克夏
-        "FINRA_DLY_BUD4327587":    "US035242AM81",  # 百威英博
-        "FINRA_DLY_CI4866401":     "US125523AK66",  # 信諾
-        "FINRA_DLY_CI5003121":     "US125523CF53",  # 信諾
-        "FINRA_DLY_CMCS4382861":   "US20030NBU46",  # 康卡斯特
-        "FINRA_DLY_FBUO6172956":   "US31428XCA28",  # 聯邦快遞
-        "FINRA_DLY_GILD4287890":   "US375558BD48",  # 吉利德2（4.75%）
-        "FINRA_DLY_GILD4287891":   "US375558BD48",  # 吉利德2
-        "FINRA_DLY_GM4181484":     "US37045VAT70",  # 通用汽車
-        "FINRA_DLY_HBC US404280AG49": "US404280AG49", # 匯豐
-        "FINRA_DLY_IBM5449458":    "US449276AF17",  # IBM
-        "FINRA_DLY_ICE5414190":    "US45866FAX24",  # 洲際交易所
-        "FINRA_DLY_KO4969567":     "US191216CQ13",  # 可口可樂
-        "FINRA_DLY_MO4065695":     "US02209SAR40",  # 高特利集團
-        "FINRA_DLY_MO4403915":     "US02209SAV51",  # 高特利集團2
-        "FINRA_DLY_MS4204532":     "US61747YDY86",  # 摩根士丹利
-        "FINRA_DLY_NFLX5862368":   "US64110LBA35",  # 網飛
-        "FINRA_DLY_QCOM4246685":   "US747525AK99",  # 高通
-        "FINRA_DLY_SCBFF4110430":  "XS1049699926",  # 渣打
-        "FINRA_DLY_SDBO4820048":   "US854502AJ02",  # 史丹利百得
-        "FINRA_DLY_SWK.GM":        "US854502AA92",  # 史丹利百得2
-        "FINRA_DLY_T4237450":      "US00206RCQ39",  # AT&T
-        "FINRA_DLY_T4451561":      "US00206RCU41",  # AT&T
-        "FINRA_DLY_USB5600582":    "US91159HJN17",  # 美國合眾銀
-        "FINRA_DLY_VIA4987234":    "US92556HAC16",  # 維康
-        "FINRA_DLY_VZ4968008":     "US92343VGW81",  # 威瑞森
-        "FINRA_DLY_VZ5363445":     "US92343VFD10",  # 威瑞森2
+        "FINRA_DLY_APO5813716":    "US03769MAC01",
+        "FINRA_DLY_BIIB4981508":   "US09062XAG88",
+        "FINRA_DLY_BRK3963113":    "US084670BK32",
+        "FINRA_DLY_BUD4327587":    "US035242AM81",
+        "FINRA_DLY_CI4866401":     "US125523AK66",
+        "FINRA_DLY_CI5003121":     "US125523CF53",
+        "FINRA_DLY_CMCS4382861":   "US20030NBU46",
+        "FINRA_DLY_FBUO6172956":   "US31428XCA28",
+        "FINRA_DLY_GILD4287890":   "US375558BD48",
+        "FINRA_DLY_GILD4287891":   "US375558BD48",
+        "FINRA_DLY_GM4181484":     "US37045VAT70",
+        "FINRA_DLY_HBC US404280AG49": "US404280AG49",
+        "FINRA_DLY_IBM5449458":    "US449276AF17",
+        "FINRA_DLY_ICE5414190":    "US45866FAX24",
+        "FINRA_DLY_KO4969567":     "US191216CQ13",
+        "FINRA_DLY_MO4065695":     "US02209SAR40",
+        "FINRA_DLY_MO4403915":     "US02209SAV51",
+        "FINRA_DLY_MS4204532":     "US61747YDY86",
+        "FINRA_DLY_NFLX5862368":   "US64110LBA35",
+        "FINRA_DLY_QCOM4246685":   "US747525AK99",
+        "FINRA_DLY_SCBFF4110430":  "XS1049699926",
+        "FINRA_DLY_SDBO4820048":   "US854502AJ02",
+        "FINRA_DLY_SWK.GM":        "US854502AA92",
+        "FINRA_DLY_T4237450":      "US00206RCQ39",
+        "FINRA_DLY_T4451561":      "US00206RCU41",
+        "FINRA_DLY_USB5600582":    "US91159HJN17",
+        "FINRA_DLY_VIA4987234":    "US92556HAC16",
+        "FINRA_DLY_VZ4968008":     "US92343VGW81",
+        "FINRA_DLY_VZ5363445":     "US92343VFD10",
     }
 
-    # 先查 FINRA 對照表
     for key, isin in FINRA_DB.items():
         if key.lower() in name.lower():
             return isin
 
-    # 再從檔名抓 ISIN（支援 US 和 XS 開頭，12碼）
     isin_match = re.search(r'([A-Z]{2}[A-Z0-9]{10})', name)
     if isin_match:
         return isin_match.group(1)
@@ -329,23 +321,37 @@ def load_master_db():
             name = str(row.get("債券名稱", "")).strip()
             if not code or not name:
                 continue
-            existing = db.get(code, {})
+
+            # ★ 直接從 Google Sheet 讀票息率
+            raw_coupon = row.get("票息率", "")
+            try:
+                coupon = float(str(raw_coupon).replace("%", "").strip())
+            except:
+                coupon = db.get(code, {}).get("coupon", 0.0)  # 讀不到就用LOCAL_DB備用
+
+            # ★ 直接從 Google Sheet 讀到期日（只取前4碼年份）
+            raw_maturity = row.get("到期日", "")
+            try:
+                maturity = str(raw_maturity).strip()[:4]
+                if not maturity.isdigit():
+                    maturity = db.get(code, {}).get("maturity", "")
+            except:
+                maturity = db.get(code, {}).get("maturity", "")
+
             db[code] = {
                 "issuer":   name,
-                "coupon":   existing.get("coupon", 0.0),
-                "maturity": existing.get("maturity", ""),
+                "coupon":   coupon,
+                "maturity": maturity,
             }
         return db
     except Exception:
         return LOCAL_DB
 
 def batch_lookup_bond_info(isin_list):
-    """從對照表查詢（優先Google Sheets，失敗則LOCAL_DB）"""
     db = load_master_db()
     return {isin: db.get(isin, {"issuer": isin, "coupon": 0.0, "maturity": ""}) for isin in isin_list}
 
 def lookup_bond_info(isin):
-    """單一 ISIN 查詢"""
     db = load_master_db()
     return db.get(isin, {"issuer": isin, "coupon": 0.0, "maturity": ""})
 
@@ -405,12 +411,11 @@ def color_cell(val):
     return "color:#888;"
 
 def get_chinese_font():
-    """取得中文字體，優先用系統字體，否則下載"""
-    import os, tempfile, requests as req
+    import os
+    import requests as req
 
     font_name = "ChineseFont"
 
-    # 先試系統字體
     system_paths = [
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJKtc-Regular.otf",
@@ -425,7 +430,6 @@ def get_chinese_font():
             except:
                 continue
 
-    # 下載 WQY Microhei（輕量中文字體）
     try:
         cache_path = "/tmp/wqy_microhei.ttc"
         if not os.path.exists(cache_path):
@@ -438,11 +442,10 @@ def get_chinese_font():
     except:
         pass
 
-    return "Helvetica"  # 備用英文字體
+    return "Helvetica"
 
 def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, all_years, chart_start, chart_end, lang="zh", style="fubon", max_years=5):
-    """生成債券績效比較 PDF 報告"""
-    import io, os, tempfile
+    import io, os
     from datetime import date
 
     buf = io.BytesIO()
@@ -452,7 +455,6 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
         topMargin=2*cm, bottomMargin=2*cm
     )
 
-    # 語言文字對照
     if lang == "en":
         L = {
             "title": "Bond Performance Comparison Report",
@@ -486,10 +488,8 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
             "y_axis": "總報酬指數（起始=100，含息）",
         }
 
-    # 取得中文字體
     font_name = get_chinese_font()
 
-    # 根據風格設定顏色
     if style == "fubon":
         NAVY    = colors.HexColor("#1a2744")
         GOLD    = colors.HexColor("#c8a84b")
@@ -499,8 +499,6 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
         bond_colors_hex = ["#1565c0","#c62828","#2e7d32","#6a1b9a","#e65100","#00838f"]
         header_bg = NAVY
         accent = GOLD
-        title_bg = NAVY
-        row_colors = [colors.HexColor("#f0f4ff"), colors.white]
     elif style == "simple":
         NAVY    = colors.HexColor("#222222")
         GOLD    = colors.HexColor("#555555")
@@ -510,9 +508,7 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
         bond_colors_hex = ["#222222","#555555","#888888","#aaaaaa","#cccccc","#dddddd"]
         header_bg = colors.HexColor("#333333")
         accent = colors.HexColor("#888888")
-        title_bg = colors.HexColor("#222222")
-        row_colors = [colors.HexColor("#f5f5f5"), colors.white]
-    else:  # colorful
+    else:
         NAVY    = colors.HexColor("#2c3e50")
         GOLD    = colors.HexColor("#f39c12")
         WHITE   = colors.white
@@ -521,18 +517,16 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
         bond_colors_hex = ["#3498db","#e74c3c","#2ecc71","#9b59b6","#f39c12","#1abc9c"]
         header_bg = colors.HexColor("#2c3e50")
         accent = colors.HexColor("#f39c12")
-        title_bg = colors.HexColor("#3498db")
-        row_colors = [colors.HexColor("#eaf6ff"), colors.white]
 
-    bond_colors_rl = [colors.HexColor(h) for h in bond_colors_hex]
+    row_colors = [BG_GRAY, WHITE]
 
-    styles = getSampleStyleSheet()
+    styles_obj = getSampleStyleSheet()
     title_style = ParagraphStyle("title", fontName=font_name, fontSize=22,
                                  textColor=WHITE, alignment=TA_CENTER, spaceAfter=4)
     sub_style   = ParagraphStyle("sub", fontName=font_name, fontSize=11,
                                  textColor=colors.HexColor("#cce0ff"), alignment=TA_CENTER)
     h2_style    = ParagraphStyle("h2", fontName=font_name, fontSize=13,
-                                 textColor=NAVY, spaceBefore=14, spaceAfter=6, fontWeight="bold")
+                                 textColor=NAVY, spaceBefore=14, spaceAfter=6)
     body_style  = ParagraphStyle("body", fontName=font_name, fontSize=9,
                                  textColor=colors.HexColor("#333333"), spaceAfter=4)
     small_style = ParagraphStyle("small", fontName=font_name, fontSize=7.5,
@@ -544,20 +538,19 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
 
     story = []
 
-    # ── 封面標題區 ──────────────────────────────────
+    # 封面標題
     title_table = Table([[Paragraph(L["title"], title_style)],
                          [Paragraph(L["period"], sub_style)]],
                         colWidths=[17*cm])
     title_table.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (-1,-1), NAVY),
-        ("ROUNDEDCORNERS", [8]),
         ("TOPPADDING",    (0,0), (-1,-1), 14),
         ("BOTTOMPADDING", (0,0), (-1,-1), 14),
     ]))
     story.append(title_table)
     story.append(Spacer(1, 0.5*cm))
 
-    # ── 一、債券基本資訊 ──────────────────────────────
+    # 一、債券基本資訊
     story.append(Paragraph(L["s1"], h2_style))
     story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
 
@@ -565,8 +558,8 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     for idx, (b, df) in enumerate(loaded):
         isin = parse_filename(b["selected"])
         info = LOCAL_DB.get(isin, {})
-        issuer  = info.get("issuer", "-")
-        coupon  = f"{info.get('coupon', '-')}%" if info.get('coupon') else "-"
+        issuer   = info.get("issuer", "-")
+        coupon   = f"{info.get('coupon', '-')}%" if info.get('coupon') else "-"
         maturity = info.get("maturity", "-")
         info_data.append([
             Paragraph(f"<font color='{bond_colors_hex[idx]}'>●</font> {b['label']}", body_style),
@@ -589,7 +582,7 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     story.append(info_table)
     story.append(Spacer(1, 0.4*cm))
 
-    # ── 二、各期間績效比較 ────────────────────────────
+    # 二、各期間績效
     story.append(Paragraph(L["s2"], h2_style))
     story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
 
@@ -633,7 +626,7 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     story.append(perf_table)
     story.append(Spacer(1, 0.4*cm))
 
-    # ── 三、走勢圖 ────────────────────────────────────
+    # 三、走勢圖
     story.append(PageBreak())
     story.append(Paragraph(L["s3"], h2_style))
     story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
@@ -645,7 +638,6 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
         import matplotlib.ticker as mticker
         from matplotlib import font_manager
 
-        # 設定中文字體
         font_path = None
         for p in ["/tmp/wqy_microhei.ttc",
                   "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
@@ -692,12 +684,11 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
 
     story.append(Spacer(1, 0.4*cm))
 
-    # ── 四、年度報酬 ──────────────────────────────────
+    # 四、年度報酬
     story.append(Paragraph(L["s4"], h2_style))
     story.append(HRFlowable(width="100%", thickness=2, color=GOLD, spaceAfter=6))
 
-    # 只顯示最近 max_years 年，且過濾掉全部無資料的年度
-    filtered_years = all_years[:max_years]  # all_years 已按降序排列
+    filtered_years = all_years[:max_years]
 
     ann_header = [L["col_year"]]
     for b, _ in all_annual:
@@ -718,7 +709,7 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     story.append(ann_table)
     story.append(Spacer(1, 0.4*cm))
 
-    # ── 五、免責聲明 ──────────────────────────────────
+    # 五、免責聲明
     story.append(HRFlowable(width="100%", thickness=1, color=GRAY, spaceBefore=8, spaceAfter=6))
     story.append(Paragraph(L["disclaimer"], warn_style))
 
@@ -727,21 +718,17 @@ def generate_pdf_report(loaded, loaded_filtered, all_data, periods, all_annual, 
     return buf
 
 
-
 # ==========================================
 # 主介面
 # ==========================================
 st.markdown("## 📊 債券投資工具")
 st.markdown("---")
 
-# 主分頁
-
 st.markdown("從 bond_master 主資料表讀取清單，選擇債券後比較績效")
 
 folder_id = st.secrets.get("FOLDER_ID", "")
 
 try:
-    # 1. 從 bond_master 讀取選單清單
     with st.spinner("正在讀取 bond_master 主資料表..."):
         creds_info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
         creds = Credentials.from_service_account_info(
@@ -758,7 +745,6 @@ try:
         st.warning("⚠️ bond_master 試算表是空的，請先填入債券資料。")
         st.stop()
 
-    # 2. 從 bond-data 資料夾取得所有試算表 ID（用來讀價格）
     with st.spinner("正在讀取 bond-data 資料夾..."):
         files = list_sheets_in_folder(folder_id)
     file_options = {f["name"]: f["id"] for f in files if "bond_master" not in f["name"].lower()}
@@ -767,13 +753,11 @@ try:
         st.error(f"❌ bond-data 資料夾是空的！FOLDER_ID={folder_id}")
         st.stop()
 
-    # 3. 建立選單：顯示名稱 → sheet_id
     bond_info_cache = {}
     display_to_sheet = {}
     display_to_isin  = {}
 
     for row in master_rows:
-        # 處理欄位全擠在一起的情況
         keys = list(row.keys())
         if len(keys) == 1 and ',' in keys[0]:
             import csv as _csv, io as _io
@@ -787,9 +771,9 @@ try:
         bond_name = str(row.get("債券名稱", "")).strip()
         if not filename or not bond_name:
             continue
+
         sheet_id = None
         for fname, fid in file_options.items():
-            # 清理兩邊的名稱再比對
             clean_master = filename.replace(", 1D", "").replace(",1D", "").strip()
             clean_fname  = fname.replace(", 1D", "").replace(",1D", "").replace(".csv", "").strip()
             if clean_master == clean_fname or clean_master in clean_fname or clean_fname in clean_master:
@@ -797,10 +781,27 @@ try:
                 break
         if not sheet_id:
             continue
-        db_info  = load_master_db().get(isin, {})
-        coupon   = db_info.get("coupon", 0.0)
-        maturity = db_info.get("maturity", "")
-        bond_info_cache[isin] = {"issuer": bond_name, "coupon": coupon, "maturity": maturity}
+
+        # ★ 票息率和到期日直接從 bond_master 這行讀，不靠 load_master_db
+        raw_coupon = row.get("票息率", "")
+        try:
+            coupon = float(str(raw_coupon).replace("%", "").strip())
+        except:
+            coupon = LOCAL_DB.get(isin, {}).get("coupon", 0.0)
+
+        raw_maturity = row.get("到期日", "")
+        try:
+            maturity = str(raw_maturity).strip()[:4]
+            if not maturity.isdigit():
+                maturity = LOCAL_DB.get(isin, {}).get("maturity", "")
+        except:
+            maturity = LOCAL_DB.get(isin, {}).get("maturity", "")
+
+        bond_info_cache[isin] = {
+            "issuer":   bond_name,
+            "coupon":   coupon,
+            "maturity": maturity,
+        }
         display_name = f"{bond_name}（{isin}）" if isin else bond_name
         display_to_sheet[display_name] = sheet_id
         display_to_isin[display_name]  = isin
@@ -808,7 +809,6 @@ try:
     display_names = sorted(display_to_sheet.keys())
 
     if not display_names:
-        # 顯示debug資訊
         st.warning("⚠️ bond_master 的債券都找不到對應的 bond-data 試算表。")
         with st.expander("🔍 Debug 資訊"):
             st.write(f"bond-data 資料夾共 {len(file_options)} 個試算表")
@@ -818,11 +818,6 @@ try:
                 st.write("第1行的所有欄位key：", list(master_rows[0].keys()))
                 st.write("第1行內容：", master_rows[0])
         st.stop()
-
-except Exception as e:
-    st.error(f"❌ 無法連接 Google Drive：{e}")
-    st.stop()
-
 
 except Exception as e:
     st.error(f"❌ 無法連接 Google Drive：{e}")
@@ -840,7 +835,7 @@ for i in range(n):
         color = COLORS[i]
         label = LABELS[i]
         st.markdown(f'<span class="bond-tag" style="background:{color}">債券 {label}</span>', unsafe_allow_html=True)
-    
+
         selected_display = st.selectbox(
             f"選擇債券",
             options=["（請選擇）"] + display_names,
@@ -849,7 +844,6 @@ for i in range(n):
         sheet_id = display_to_sheet.get(selected_display) if selected_display != "（請選擇）" else None
         isin = display_to_isin.get(selected_display, "") if selected_display != "（請選擇）" else ""
 
-        # 從預載快取取債券資訊
         if sheet_id and isin and isin in bond_info_cache:
             info = bond_info_cache[isin]
             issuer = info["issuer"]
@@ -898,7 +892,6 @@ if loaded:
     periods = [("1個月",30),("3個月",90),("6個月",180),
                ("1年",365),("2年",730),("3年",1095),("5年",1825)]
 
-    # 資料期間
     info_cols = st.columns(len(loaded))
     for idx, (b, df) in enumerate(loaded):
         with info_cols[idx]:
@@ -907,9 +900,7 @@ if loaded:
 
     all_data = [(b, {label: calc_period(df, b["coupon"], days) for label, days in periods}) for b, df in loaded]
 
-    # ==========================================
     # 一、各期間績效比較表
-    # ==========================================
     st.subheader("🏆 各期間績效比較")
 
     html = '<table class="compare-table"><thead><tr>'
@@ -935,7 +926,6 @@ if loaded:
             html += f'<td class="hl">{fmt(r["total"], bold=True) if r else "—"}</td>'
         html += "</tr>"
 
-    # 勝出統計
     wins = [0] * len(all_data)
     for period_label, _ in periods:
         valid = [(i, all_data[i][1].get(period_label)) for i in range(len(all_data))]
@@ -977,20 +967,16 @@ if loaded:
     </div>
     """, unsafe_allow_html=True)
 
-    # ==========================================
     # 二、走勢圖
-    # ==========================================
     st.markdown("---")
     st.subheader("📈 價格走勢圖")
 
-    # 找出所有已載入債券的最早和最晚日期
     all_min_date = min(df["date"].min() for _, df in loaded).date()
     all_max_date = max(df["date"].max() for _, df in loaded).date()
 
     from datetime import date, timedelta
     today = all_max_date
 
-    # 快速選擇按鈕（寫入獨立的 _val key，不跟 date_input 衝突）
     st.markdown("**快速選擇區間：**")
     qcol1, qcol2, qcol3, qcol4, qcol5 = st.columns(5)
     if qcol1.button("1年"):
@@ -1009,7 +995,6 @@ if loaded:
         st.session_state["chart_start_val"] = all_min_date
         st.rerun()
 
-    # 計算預設值，確保在合法範圍內
     default_start = st.session_state.get("chart_start_val", all_min_date)
     default_start = max(min(default_start, all_max_date), all_min_date)
 
@@ -1031,7 +1016,6 @@ if loaded:
             key="chart_end_input"
         )
 
-    # 篩選後的 loaded
     chart_start_ts = pd.Timestamp(chart_start)
     chart_end_ts = pd.Timestamp(chart_end)
     loaded_filtered = [
@@ -1076,9 +1060,7 @@ if loaded:
                            legend=dict(orientation="h", yanchor="bottom", y=1.02))
         st.plotly_chart(fig3, use_container_width=True)
 
-    # ==========================================
     # 三、年度報酬表
-    # ==========================================
     st.markdown("---")
     st.subheader("📅 年度報酬回顧")
 
@@ -1109,22 +1091,14 @@ if loaded:
     ann_html += "</tbody></table>"
     st.markdown(ann_html, unsafe_allow_html=True)
 
-    # ==========================================
     # 四、生成 PDF 報告
-    # ==========================================
     st.markdown("---")
     st.subheader("📄 生成比較報告")
     st.caption("點擊下方按鈕，生成包含債券基本資訊、績效比較、走勢圖、年度報酬的精美 PDF 報告")
 
-    report_lang = st.radio(
-        "報告語言版本",
-        ["中文版", "English"],
-        horizontal=True
-    )
+    report_lang = st.radio("報告語言版本", ["中文版", "English"], horizontal=True)
     lang_code = "zh" if report_lang == "中文版" else "en"
-
     style_code = "fubon"
-
     max_years = st.slider("年度報酬顯示幾年", min_value=1, max_value=10, value=5, step=1)
 
     if st.button("🖨️ 生成 PDF 報告", type="primary", use_container_width=True):
@@ -1169,12 +1143,6 @@ else:
     4. 上傳 CSV 到 Google 雲端硬碟的 `bond-data` 資料夾
     5. 重新整理此頁面，下拉選單會自動更新！
     """)
-
-# ==========================================
-# 現金流試算分頁
-# ==========================================
-
-# 基金/ELN 對照表
 
 st.markdown("---")
 st.warning("⚠️ **免責聲明**：本工具所顯示之價格資料來源為 TradingView，僅供參考，並非本行實際報價。實際申購價格以本行公告為準，投資人應自行評估風險。本工具**僅供內部教育訓練使用，請勿外流**。")
