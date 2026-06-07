@@ -5,7 +5,7 @@ plotly
 requests
 gspread
 google-auth
-scipy
-yfinance
 reportlab
 pypdf
+scipy
+yfinance
