@@ -191,6 +191,8 @@ def parse_filename(name):
         "FINRA_DLY_VIA4987234":    "US92556HAC16",
         "FINRA_DLY_VZ4968008":     "US92343VGW81",
         "FINRA_DLY_VZ5363445":     "US92343VFD10",
+        "FINRA_DLY_AVGO6183496":   "US11135FCX78",
+        "FINRA_DLY_UBS5728143":    "USH4209EU71",
     }
 
     for key, isin in FINRA_DB.items():
@@ -231,6 +233,8 @@ LOCAL_DB = {
     "XS1982116136": {"issuer": "沙烏地阿拉伯石油公司債4", "coupon": 4.375, "maturity": "2049"},
     "US58933YAW57": {"issuer": "默克藥廠公司債1", "coupon": 4.0, "maturity": "2049"},
     "US125523AK66": {"issuer": "信諾公司債1", "coupon": 4.9, "maturity": "2048"},
+    "US11135FCX78": {"issuer": "博通公司債1", "coupon": 4.9, "maturity": "2038"},
+    "USH4209EU71":  {"issuer": "瑞銀集團公司債1", "coupon": 5.699, "maturity": "2037"},
     "US88579YBD22": {"issuer": "3M 公司債1", "coupon": 4.0, "maturity": "2048"},
     "US084664CQ25": {"issuer": "波克夏海瑟威金融公司債1", "coupon": 4.2, "maturity": "2048"},
     "XS1807174559": {"issuer": "卡達政府國際債1", "coupon": 5.103, "maturity": "2048"},
