@@ -1,10 +1,11 @@
+streamlit
 pandas
 numpy
 plotly
-streamlit
+requests
 gspread
 google-auth
-requests
-reportlab
-matplotlib
 scipy
+yfinance
+reportlab
+pypdf
