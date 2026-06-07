@@ -143,13 +143,26 @@ def read_sheet(sheet_id):
             ws = sh.get_worksheet(0)
             data = ws.get_all_records()
             df = pd.DataFrame(data)
+            # 統一日期欄位
             if "time" in df.columns:
-                df["date"] = pd.to_datetime(df["time"], unit="s")
+                df["date"] = pd.to_datetime(df["time"], unit="s", errors="coerce")
+                if df["date"].isna().mean() > 0.5:
+                    df["date"] = pd.to_datetime(df["time"], errors="coerce")
             elif "date" in df.columns:
-                df["date"] = pd.to_datetime(df["date"])
+                df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            elif "日期" in df.columns:
+                df["date"] = pd.to_datetime(df["日期"], errors="coerce")
             else:
-                df["date"] = pd.to_datetime(df.iloc[:, 0])
-            df = df[["date", "close"]].sort_values("date").reset_index(drop=True)
+                df["date"] = pd.to_datetime(df.iloc[:, 0], errors="coerce")
+            # 統一價格欄位
+            if "close" not in df.columns:
+                if "收盤價" in df.columns:
+                    df["close"] = pd.to_numeric(df["收盤價"], errors="coerce")
+                elif "殖利率" in df.columns:
+                    df["close"] = pd.to_numeric(df["殖利率"], errors="coerce")
+                else:
+                    df["close"] = pd.to_numeric(df.iloc[:, 1], errors="coerce")
+            df = df[["date", "close"]].dropna().sort_values("date").reset_index(drop=True)
             return df
         except Exception as e:
             if "503" in str(e) and attempt < 2:
